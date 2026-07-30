@@ -535,7 +535,7 @@ public class BaiscApplication {
   /**
    * 采集当前网页上所有结果字段，返回一行数据（与 toList 列顺序一致，不含中间值）
    */
-  private static List<Object> collectRowData(WebDriver driver, String lineNumber) {
+  public static List<Object> collectRowData(WebDriver driver, String lineNumber) {
     List<Object> row = new ArrayList<>();
     row.add(lineNumber);
     // Wet Air (5 fields)

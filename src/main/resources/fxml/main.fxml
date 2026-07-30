@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.*?>
+
+<VBox spacing="12" style="-fx-padding: 16; -fx-background-color: #f5f5f7;" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.sd.discovery.single.MainController">
+
+    <!-- Header -->
+    <HBox alignment="CENTER_LEFT" spacing="10" style="-fx-padding: 0 0 8 0;">
+        <Label text="P5" style="-fx-background-color: #0071e3; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14; -fx-padding: 6 10; -fx-background-radius: 8;" />
+        <Label text="Procalc5 转子计算器" style="-fx-font-size: 18; -fx-font-weight: bold;" />
+        <Region HBox.hgrow="ALWAYS" />
+        <Label text="v1.0.0" style="-fx-text-fill: #86868b; -fx-font-size: 11;" />
+    </HBox>
+
+    <!-- Input File Section -->
+    <VBox spacing="6">
+        <Label text="输入文件" style="-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #86868b;" />
+        <StackPane fx:id="dropZone" minHeight="80" maxHeight="80" style="-fx-border-color: #c7c7cc; -fx-border-width: 2; -fx-border-style: dashed; -fx-border-radius: 12; -fx-background-radius: 12; -fx-background-color: white; -fx-cursor: hand;"
+                   onMouseClicked="#onSelectFile" onDragOver="#onDragOver" onDragDropped="#onDragDropped">
+            <VBox alignment="CENTER" spacing="4">
+                <Label fx:id="dropIcon" text="📊" style="-fx-font-size: 24;" visible="false" managed="false" />
+                <Label fx:id="dropFileName" text="拖拽 .xlsx 文件到此处，或点击选择" style="-fx-font-size: 13; -fx-text-fill: #86868b;" />
+                <Label fx:id="dropFileDetail" text="支持 procalc5.proflute.xlsx 格式" style="-fx-font-size: 11; -fx-text-fill: #aeaeb2;" />
+            </VBox>
+        </StackPane>
+    </VBox>
+
+    <!-- Output Directory -->
+    <VBox spacing="6">
+        <Label text="输出目录" style="-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #86868b;" />
+        <HBox spacing="8">
+            <TextField fx:id="outputDirField" HBox.hgrow="ALWAYS" promptText="选择输出目录..."
+                       style="-fx-background-radius: 6; -fx-border-radius: 6; -fx-border-color: #c7c7cc; -fx-font-family: monospace; -fx-font-size: 12;" />
+            <Button text="📂 选择" onAction="#onSelectDir"
+                    style="-fx-background-color: white; -fx-border-color: #c7c7cc; -fx-border-radius: 6; -fx-background-radius: 6; -fx-cursor: hand; -fx-font-size: 12;" />
+        </HBox>
+    </VBox>
+
+    <!-- Login Config -->
+    <VBox spacing="6">
+        <Label text="登录配置" style="-fx-font-size: 12; -fx-font-weight: bold; -fx-text-fill: #86868b;" />
+        <GridPane hgap="10" vgap="8">
+            <Label text="用户名" GridPane.rowIndex="0" GridPane.columnIndex="0" style="-fx-font-size: 11; -fx-text-fill: #86868b;" />
+            <TextField fx:id="usernameField" GridPane.rowIndex="1" GridPane.columnIndex="0" promptText="输入用户名"
+                       style="-fx-background-radius: 6; -fx-border-radius: 6; -fx-border-color: #c7c7cc; -fx-font-size: 12;" />
+            <Label text="密码" GridPane.rowIndex="0" GridPane.columnIndex="1" style="-fx-font-size: 11; -fx-text-fill: #86868b;" />
+            <PasswordField fx:id="passwordField" GridPane.rowIndex="1" GridPane.columnIndex="1" promptText="输入密码"
+                           style="-fx-background-radius: 6; -fx-border-radius: 6; -fx-border-color: #c7c7cc; -fx-font-size: 12;" />
+            <columnConstraints>
+                <ColumnConstraints percentWidth="50" />
+                <ColumnConstraints percentWidth="50" />
+            </columnConstraints>
+        </GridPane>
+        <HBox alignment="CENTER_LEFT" spacing="8">
+            <CheckBox fx:id="rememberCheck" text="记住密码" selected="true" style="-fx-font-size: 12;" />
+            <Region HBox.hgrow="ALWAYS" />
+            <Label text="网页: procalc5.proflute.se" style="-fx-font-size: 11; -fx-text-fill: #aeaeb2;" />
+            <Label text="  |  空值容忍: 5次" style="-fx-font-size: 11; -fx-text-fill: #aeaeb2;" />
+        </HBox>
+    </VBox>
+
+    <!-- Control Buttons -->
+    <HBox spacing="10" style="-fx-padding: 4 0;">
+        <Button fx:id="startBtn" text="▶  开始运行" onAction="#onStart" HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                style="-fx-background-color: #0071e3; -fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold; -fx-background-radius: 8; -fx-padding: 10; -fx-cursor: hand;" />
+        <Button text="📂 打开目录" onAction="#onOpenDir"
+                style="-fx-background-color: white; -fx-border-color: #c7c7cc; -fx-border-radius: 8; -fx-background-radius: 8; -fx-padding: 10 16; -fx-cursor: hand; -fx-font-size: 13;" />
+    </HBox>
+
+    <!-- Stats Bar -->
+    <HBox spacing="0" style="-fx-background-color: white; -fx-border-color: #e5e5ea; -fx-border-radius: 8; -fx-background-radius: 8; -fx-padding: 10 0;">
+        <VBox alignment="CENTER" HBox.hgrow="ALWAYS">
+            <Label fx:id="statGroups" text="0/0" style="-fx-font-size: 18; -fx-font-weight: bold;" />
+            <Label text="已完成组" style="-fx-font-size: 10; -fx-text-fill: #86868b;" />
+        </VBox>
+        <VBox alignment="CENTER" HBox.hgrow="ALWAYS">
+            <Label fx:id="statHits" text="0" style="-fx-font-size: 18; -fx-font-weight: bold;" />
+            <Label text="有效数据" style="-fx-font-size: 10; -fx-text-fill: #86868b;" />
+        </VBox>
+        <VBox alignment="CENTER" HBox.hgrow="ALWAYS">
+            <Label fx:id="statBest" text="0" style="-fx-font-size: 18; -fx-font-weight: bold;" />
+            <Label text="最优解" style="-fx-font-size: 10; -fx-text-fill: #86868b;" />
+        </VBox>
+        <VBox alignment="CENTER" HBox.hgrow="ALWAYS">
+            <Label fx:id="statTime" text="00:00" style="-fx-font-size: 18; -fx-font-weight: bold;" />
+            <Label text="运行时间" style="-fx-font-size: 10; -fx-text-fill: #86868b;" />
+        </VBox>
+    </HBox>
+
+    <!-- Progress -->
+    <VBox spacing="4">
+        <ProgressBar fx:id="progressBar" progress="0" maxWidth="Infinity" style="-fx-accent: #0071e3;" />
+        <HBox>
+            <Label fx:id="progressLabel" text="就绪" style="-fx-font-size: 11; -fx-text-fill: #86868b;" />
+            <Region HBox.hgrow="ALWAYS" />
+            <Label fx:id="progressPercent" text="0%" style="-fx-font-size: 11; -fx-text-fill: #86868b;" />
+        </HBox>
+    </VBox>
+
+    <!-- Log Panel -->
+    <VBox spacing="0" VBox.vgrow="ALWAYS" style="-fx-background-color: white; -fx-border-color: #e5e5ea; -fx-border-radius: 8; -fx-background-radius: 8;">
+        <HBox alignment="CENTER_LEFT" style="-fx-padding: 8 12; -fx-border-color: transparent transparent #e5e5ea transparent;">
+            <Label text="运行日志" style="-fx-font-size: 12; -fx-font-weight: bold;" />
+            <Region HBox.hgrow="ALWAYS" />
+            <Button text="清空" onAction="#onClearLog" style="-fx-background-color: transparent; -fx-text-fill: #86868b; -fx-font-size: 11; -fx-cursor: hand;" />
+        </HBox>
+        <ScrollPane fx:id="logScrollPane" fitToWidth="true" VBox.vgrow="ALWAYS" style="-fx-background: white; -fx-border-color: transparent;">
+            <VBox fx:id="logContainer" style="-fx-padding: 4 12 8 12;" />
+        </ScrollPane>
+    </VBox>
+
+</VBox>
