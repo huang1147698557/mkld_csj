@@ -6,7 +6,13 @@ import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.poi.excel.ExcelUtil;
 import cn.hutool.poi.excel.ExcelWriter;
+import cn.hutool.poi.excel.cell.CellUtil;
 import com.google.common.collect.Lists;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -30,6 +36,8 @@ public class BaiscApplication {
 
   // 默认工作目录：Windows=C:\procalc5，Mac/Linux=用户目录下的procalc5
   private static String workDir;
+  private static String sessionStartTime; // 本次会话时间戳 yyyyMMddHHmmss
+  private static int writerRowIndex = 1;  // 当前写入行索引（用于追加写入）
 
   static {
     boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
@@ -82,7 +90,7 @@ public class BaiscApplication {
     options.addArguments("--no-sandbox");
     options.addArguments("--disable-dev-shm-usage");
     WebDriver driver = new ChromeDriver(options);
-    String sheetName = DateUtil.format(DateUtil.date(), "yyyyMMddHHmmss");
+    sessionStartTime = DateUtil.format(DateUtil.date(), "yyyyMMddHHmmss");
     driver.get("https://procalc5.proflute.se/rotor");
     ThreadUtil.safeSleep(8000);
     WebElement username = driver.findElement(By.id("userNameInput"));
@@ -93,9 +101,24 @@ public class BaiscApplication {
     login.click();
     ThreadUtil.safeSleep(5000);
     String sep = System.getProperty("os.name").toLowerCase().contains("win") ? "\\" : "/";
-    ExcelWriter excelWriter = ExcelUtil.getWriter(workDir + sep + "result.xlsx", sheetName);
-    excelWriter.writeHeadRow(Lists.newArrayList("序号", " Wet Air:", "", "", "", "", "Process left", "", "", "", "", "", "", "Process Right",
-        "", "", "", "", "", "Reactivation", "", "", "", "", "", "", "RPH"));
+    // 全量累积文件：追加模式
+    String allFilePath = workDir + sep + "calculate_results_all.xlsx";
+    File allFile = new File(allFilePath);
+    List<String> header = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
+        "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
+        "", "", "", "", "", "", "RPH");
+    ExcelWriter excelWriter;
+    if (allFile.exists()) {
+      // 追加：读取已有行数，跳过一行空白后继续写入
+      int existingCount = ExcelUtil.getReader(allFilePath).read().size();
+      excelWriter = ExcelUtil.getWriter(allFilePath);
+      writerRowIndex = existingCount + 1; // +1 空行分隔
+    } else {
+      // 新建文件并写表头
+      excelWriter = ExcelUtil.getWriter(allFilePath);
+      excelWriter.writeHeadRow(header);
+      writerRowIndex = 1;
+    }
     //登陆成功
     List<List<Object>> paraList = ExcelUtil.getReader(workDir + sep + "procalc5.proflute.xlsx").read();
     Double lastFoundTemp = null; // 跨行保持上一轮找到的温度值，用于下一轮倒序查找上限
@@ -457,7 +480,7 @@ public class BaiscApplication {
         Double gkgTemp = Double.parseDouble(gkgValue);
         System.out.println("[倒序查找] 温度=" + tempCurrent + ", g/kg=" + gkgTemp + ", 范围=[" + fanweiStart + "~" + fanweiEnd + "]");
         if (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd) {
-          toList(driver, ss, linesNumber, excelWriter);
+          toList(driver, ss, linesNumber, excelWriter, sessionStartTime, true);
           groupHits.add(new double[]{tempCurrent, gkgTemp}); // 记录命中
           lastFoundTemp = tempCurrent; // 记录满足条件的温度
           flag = true;
@@ -492,7 +515,12 @@ public class BaiscApplication {
         click(button);
         ThreadUtil.safeSleep(1500);
         List<Object> bestRow = collectRowData(driver, linesNumber);
+        bestRow.add(1, sessionStartTime); // 插入时间戳到第2列
         bestRow.add(NumberUtil.round(midValue, 4)); // 额外列：范围中间值
+        // 写入全量文件（红色+加粗标记最优解）
+        int bestRowIdx = writerRowIndex++;
+        excelWriter.writeRow(bestRow);
+        applyRowStyle(excelWriter, bestRowIdx, bestRow.size(), true, true);
         bestResults.add(bestRow);
       } else {
         System.out.println("[最优解] 第" + groupIndex + "组: 无命中记录，跳过");
@@ -501,17 +529,23 @@ public class BaiscApplication {
       ThreadUtil.safeSleep(1000);
     }
     excelWriter.flush();
-    // ===== 输出最优解汇总到 result_best.xlsx =====
-    ExcelWriter bestWriter = ExcelUtil.getWriter(workDir + sep + "result_best.xlsx", sheetName);
-    List<String> bestHeader = Lists.newArrayList("序号", " Wet Air:", "", "", "", "", "Process left", "", "", "", "", "", "", "Process Right",
-        "", "", "", "", "", "Reactivation", "", "", "", "", "", "RPH", "范围中间值");
+    // ===== 输出最优解汇总到 {时间戳}_result_02.xlsx =====
+    String bestFilePath = workDir + sep + sessionStartTime + "_result_02.xlsx";
+    ExcelWriter bestWriter = ExcelUtil.getWriter(bestFilePath);
+    List<String> bestHeader = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
+        "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
+        "", "", "", "", "", "", "RPH", "范围中间值");
     bestWriter.writeHeadRow(bestHeader);
+    int bestIdx = 1;
     for (List<Object> row : bestResults) {
       bestWriter.writeRow(row);
+      applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
+      bestIdx++;
     }
     bestWriter.flush();
-    System.out.println("\n===== 最优解汇总完成 =====");
-    System.out.println("共" + bestResults.size() + "组最优解，已写入: " + workDir + sep + "result_best.xlsx");
+    System.out.println("\n===== 数据汇总完成 =====");
+    System.out.println("全量数据已追加到: " + allFilePath);
+    System.out.println("共" + bestResults.size() + "组最优解，已写入: " + bestFilePath);
     System.out.println("总数据:" + ss);
   }
 
@@ -559,8 +593,11 @@ public class BaiscApplication {
     return row;
   }
 
-  public static void toList(WebDriver driver, StringBuilder ss, String lineNumber, ExcelWriter excelWriter) {
+  public static void toList(WebDriver driver, StringBuilder ss, String lineNumber,
+      ExcelWriter excelWriter, String timestamp, boolean isHit) {
     List<String> list = Lists.newArrayList();
+    list.add(lineNumber);
+    list.add(timestamp); // B列：计算时间
     String v1 = driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[1]/div/div/input")).getAttribute("value");
     String v2 = driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[2]/div/div/input")).getAttribute("value");
     String v3 = driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[3]/div/div/input")).getAttribute("value");
@@ -569,7 +606,7 @@ public class BaiscApplication {
     ss.append(lineNumber);
     ss.append(" Wet Air:");
     ss.append(" " + v1 + " " + v2 + " " + v3 + " " + v4 + " " + v5);
-    list.addAll(Arrays.asList(lineNumber, v1, v2, v3, v4, v5));
+    list.addAll(Arrays.asList(v1, v2, v3, v4, v5));
     String vv1 = driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[1]/div/div/input")).getAttribute("value");
     String vv2 = driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[2]/div/div/input")).getAttribute("value");
     String vv3 = driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[3]/div/div/input")).getAttribute("value");
@@ -604,6 +641,29 @@ public class BaiscApplication {
     ss.append(" " + vv1);
     ss.append("\r\n");
     list.addAll(Arrays.asList(vv1));
+    int rowIdx = writerRowIndex++;
     excelWriter.writeRow(list);
+    if (isHit) {
+      applyRowStyle(excelWriter, rowIdx, list.size(), true, false);
+    }
+  }
+
+  /**
+   * 对指定行应用样式：加粗和/或红色字体
+   */
+  private static void applyRowStyle(ExcelWriter writer, int rowIndex, int colCount, boolean bold, boolean red) {
+    Sheet sheet = writer.getSheet();
+    Row row = sheet.getRow(rowIndex);
+    if (row == null) return;
+    Workbook wb = writer.getWorkbook();
+    org.apache.poi.ss.usermodel.CellStyle style = wb.createCellStyle();
+    org.apache.poi.ss.usermodel.Font font = wb.createFont();
+    if (bold) font.setBold(true);
+    if (red) font.setColor(org.apache.poi.ss.usermodel.IndexedColors.RED.getIndex());
+    style.setFont(font);
+    for (int i = 0; i < colCount; i++) {
+      Cell cell = row.getCell(i);
+      if (cell != null) cell.setCellStyle(style);
+    }
   }
 }

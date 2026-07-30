@@ -6,7 +6,12 @@ import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.poi.excel.ExcelUtil;
 import cn.hutool.poi.excel.ExcelWriter;
+import cn.hutool.poi.excel.cell.CellUtil;
 import com.google.common.collect.Lists;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
@@ -50,6 +55,8 @@ public class MainController {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private Thread workerThread;
     private long startTime;
+    private String sessionStartTime; // 本次会话时间戳 yyyyMMddHHmmss
+    private int writerRowIndex = 1;  // 当前写入行索引
     private final AtomicInteger groupCount = new AtomicInteger(0);
     private final AtomicInteger hitCount = new AtomicInteger(0);
     private final AtomicInteger bestCount = new AtomicInteger(0);
@@ -294,11 +301,23 @@ public class MainController {
             ThreadUtil.safeSleep(5000);
             Platform.runLater(() -> appendLog("登录成功", "info"));
 
-            // Excel 读取
-            String sheetName = DateUtil.format(DateUtil.date(), "yyyyMMddHHmmss");
-            ExcelWriter excelWriter = ExcelUtil.getWriter(workDir + sep + "result.xlsx", sheetName);
-            excelWriter.writeHeadRow(Lists.newArrayList("序号", " Wet Air:", "", "", "", "", "Process left", "", "", "", "", "", "", "Process Right",
-                "", "", "", "", "", "Reactivation", "", "", "", "", "", "RPH"));
+            // Excel 初始化
+            sessionStartTime = DateUtil.format(DateUtil.date(), "yyyyMMddHHmmss");
+            String allFilePath = workDir + sep + "calculate_results_all.xlsx";
+            File allFile = new File(allFilePath);
+            List<String> header = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
+                "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
+                "", "", "", "", "", "", "RPH");
+            ExcelWriter excelWriter;
+            if (allFile.exists()) {
+                int existingCount = ExcelUtil.getReader(allFilePath).read().size();
+                excelWriter = ExcelUtil.getWriter(allFilePath);
+                writerRowIndex = existingCount + 1; // +1 空行分隔
+            } else {
+                excelWriter = ExcelUtil.getWriter(allFilePath);
+                excelWriter.writeHeadRow(header);
+                writerRowIndex = 1;
+            }
 
             List<List<Object>> paraList = ExcelUtil.getReader(selectedFile.getAbsolutePath()).read();
             Double lastFoundTemp = null;
@@ -446,7 +465,7 @@ public class MainController {
                     final Double gkgVal = Double.parseDouble(gkgValue);
 
                     if (fanweiStart <= gkgVal && gkgVal <= fanweiEnd) {
-                        BaiscApplication.toList(driver, ss, linesNumber, excelWriter);
+                        BaiscApplication.toList(driver, ss, linesNumber, excelWriter, sessionStartTime, true);
                         groupHits.add(new double[]{tempCurrent, gkgVal});
                         lastFoundTemp = tempCurrent;
                         flag = true;
@@ -481,7 +500,12 @@ public class MainController {
                     safeClick(button);
                     ThreadUtil.safeSleep(1500);
                     List<Object> bestRow = BaiscApplication.collectRowData(driver, linesNumber);
-                    bestRow.add(NumberUtil.round(midValue, 4));
+                    bestRow.add(1, sessionStartTime); // 插入时间戳到B列
+                    bestRow.add(NumberUtil.round(midValue, 4)); // 额外列：范围中间值
+                    // 写入全量文件（红色+加粗标记最优解）
+                    int bestRowIdx = writerRowIndex++;
+                    excelWriter.writeRow(bestRow);
+                    applyRowStyle(excelWriter, bestRowIdx, bestRow.size(), true, true);
                     bestResults.add(bestRow);
                     bestCount.incrementAndGet();
                     Platform.runLater(() -> statBest.setText(String.valueOf(bestCount.get())));
@@ -490,18 +514,29 @@ public class MainController {
 
             // 写入文件
             excelWriter.flush();
+            // 输出最优解汇总到 {时间戳}_result_02.xlsx
+            String bestFilePath = workDir + sep + sessionStartTime + "_result_02.xlsx";
             if (!bestResults.isEmpty()) {
-                ExcelWriter bestWriter = ExcelUtil.getWriter(workDir + sep + "result_best.xlsx", sheetName);
-                bestWriter.writeHeadRow(Lists.newArrayList("序号", " Wet Air:", "", "", "", "", "Process left", "", "", "", "", "", "", "Process Right",
-                    "", "", "", "", "", "Reactivation", "", "", "", "", "", "RPH", "范围中间值"));
-                for (List<Object> row : bestResults) bestWriter.writeRow(row);
+                ExcelWriter bestWriter = ExcelUtil.getWriter(bestFilePath);
+                List<String> bestHeader = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
+                    "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
+                    "", "", "", "", "", "", "RPH", "范围中间值");
+                bestWriter.writeHeadRow(bestHeader);
+                int bestIdx = 1;
+                for (List<Object> row : bestResults) {
+                    bestWriter.writeRow(row);
+                    applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
+                    bestIdx++;
+                }
                 bestWriter.flush();
             }
-
+            final String finalBestPath = bestFilePath;
+            final int finalGroupCount = groupIdx;
             Platform.runLater(() -> {
                 appendLog("===== 运行完成 =====", "info");
-                appendLog("共 " + groupCount.get() + " 组, " + hitCount.get() + " 条有效数据, " + bestCount.get() + " 个最优解", "info");
-                appendLog("结果已保存: " + workDir + sep + "result.xlsx", "info");
+                appendLog("共 " + finalGroupCount + " 组, " + hitCount.get() + " 条有效数据, " + bestCount.get() + " 个最优解", "info");
+                appendLog("全量数据已追加到: " + allFilePath, "info");
+                appendLog("最优解已写入: " + finalBestPath, "info");
                 progressBar.setProgress(1.0);
                 progressLabel.setText("运行完成");
                 progressPercent.setText("100%");
@@ -684,6 +719,25 @@ public class MainController {
     @FXML
     public void onClearLog() {
         logContainer.getChildren().clear();
+    }
+
+    /**
+     * 对指定行应用样式：加粗和/或红色字体
+     */
+    private void applyRowStyle(ExcelWriter writer, int rowIndex, int colCount, boolean bold, boolean red) {
+        Sheet sheet = writer.getSheet();
+        Row row = sheet.getRow(rowIndex);
+        if (row == null) return;
+        Workbook wb = writer.getWorkbook();
+        org.apache.poi.ss.usermodel.CellStyle style = wb.createCellStyle();
+        org.apache.poi.ss.usermodel.Font font = wb.createFont();
+        if (bold) font.setBold(true);
+        if (red) font.setColor(org.apache.poi.ss.usermodel.IndexedColors.RED.getIndex());
+        style.setFont(font);
+        for (int i = 0; i < colCount; i++) {
+            Cell cell = row.getCell(i);
+            if (cell != null) cell.setCellStyle(style);
+        }
     }
 
     private void appendLog(String msg, String type) {
