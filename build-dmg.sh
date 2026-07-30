@@ -10,6 +10,15 @@ APP_VERSION="1.0.0"
 FAT_JAR="procalc5-app.jar"
 MAIN_CLASS="com.sd.discovery.single.Procalc5App"
 OUTPUT_DIR="$PROJECT_DIR/dist"
+JAVAFX_JMODS="$PROJECT_DIR/javafx-sdk/javafx-jmods-17.0.2"
+
+# 检查 JavaFX jmods
+if [ ! -d "$JAVAFX_JMODS" ]; then
+    echo "ERROR: JavaFX jmods 目录不存在: $JAVAFX_JMODS"
+    echo "请先下载: curl -L -o /tmp/javafx-jmods.zip https://download2.gluonhq.com/openjfx/17.0.2/openjfx-17.0.2_osx-aarch64_bin-jmods.zip"
+    echo "然后解压: unzip /tmp/javafx-jmods.zip -d javafx-sdk/"
+    exit 1
+fi
 
 echo "===== Step 1: Maven 构建 fat JAR ====="
 mvn clean package -Pjavafx-app -DskipTests -q
@@ -46,6 +55,8 @@ jpackage \
   --dest "$OUTPUT_DIR" \
   --mac-package-name "$APP_NAME" \
   --mac-package-identifier "com.sd.procalc5" \
+  --module-path "$JAVAFX_JMODS" \
+  --add-modules "javafx.controls,javafx.fxml,java.base,java.logging,java.sql,java.xml,java.naming,java.management,java.desktop,jdk.charsets,jdk.crypto.ec,jdk.localedata,jdk.zipfs,java.instrument" \
   --java-options "--add-opens=javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED" \
   --java-options "--add-opens=javafx.controls/javafx.scene.control=ALL-UNNAMED" \
   --java-options "-Dfile.encoding=UTF-8"
