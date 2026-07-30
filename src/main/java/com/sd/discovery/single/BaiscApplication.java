@@ -404,6 +404,8 @@ public class BaiscApplication {
       flag = false;
       Double tempCurrent = searchUpper; // 从上限开始倒序
       int iterCount = 0;
+      int emptyCount = 0; // 连续空值计数器，容忍异常空值
+      final int MAX_EMPTY = 5; // 连续5次空值才真正中断
       while (NumberUtil.compare(tempCurrent, searchLower) >= 0) {
         iterCount++;
         fillInput(driver, Reactivation, StrUtil.toString(tempCurrent));
@@ -414,9 +416,16 @@ public class BaiscApplication {
         }
         ThreadUtil.safeSleep(1500);
         if (StrUtil.isEmpty(gkg.getAttribute("value"))) {
-          System.out.println("[倒序查找] gkg为空，中断");
-          break;
+          emptyCount++;
+          System.out.println("[倒序查找] gkg为空(连续第" + emptyCount + "次)，继续查找...");
+          if (emptyCount >= MAX_EMPTY) {
+            System.out.println("[倒序查找] 连续" + MAX_EMPTY + "次空值，中断查找");
+            break;
+          }
+          tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc); // 跳过当前继续
+          continue;
         }
+        emptyCount = 0; // 有值则重置空值计数
         Double gkgTemp = Double.parseDouble(gkg.getAttribute("value"));
         System.out.println("[倒序查找] 温度=" + tempCurrent + ", g/kg=" + gkgTemp + ", 范围=[" + fanweiStart + "~" + fanweiEnd + "]");
         if (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd) {
