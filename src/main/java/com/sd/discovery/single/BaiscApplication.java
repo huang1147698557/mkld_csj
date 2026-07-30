@@ -7,6 +7,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.poi.excel.ExcelUtil;
 import cn.hutool.poi.excel.ExcelWriter;
 import com.google.common.collect.Lists;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.openqa.selenium.By;
@@ -97,6 +98,8 @@ public class BaiscApplication {
     //登陆成功
     List<List<Object>> paraList = ExcelUtil.getReader(workDir + sep + "procalc5.proflute.xlsx").read();
     Double lastFoundTemp = null; // 跨行保持上一轮找到的温度值，用于下一轮倒序查找上限
+    List<List<Object>> bestResults = new ArrayList<>(); // 各组最优解汇总
+    int groupIndex = 0; // 组号计数器
     for (List<Object> list : paraList) {
       if (paraList.indexOf(list) == 0) {
         continue;
@@ -406,6 +409,8 @@ public class BaiscApplication {
       int iterCount = 0;
       int emptyCount = 0; // 连续空值计数器，容忍异常空值
       final int MAX_EMPTY = 5; // 连续5次空值才真正中断
+      // ===== 本轮命中记录收集（用于最优解筛选）=====
+      List<double[]> groupHits = new ArrayList<>(); // [温度, g/kg]
       while (NumberUtil.compare(tempCurrent, searchLower) >= 0) {
         iterCount++;
         fillInput(driver, Reactivation, StrUtil.toString(tempCurrent));
@@ -430,6 +435,7 @@ public class BaiscApplication {
         System.out.println("[倒序查找] 温度=" + tempCurrent + ", g/kg=" + gkgTemp + ", 范围=[" + fanweiStart + "~" + fanweiEnd + "]");
         if (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd) {
           toList(driver, ss, linesNumber, excelWriter);
+          groupHits.add(new double[]{tempCurrent, gkgTemp}); // 记录命中
           lastFoundTemp = tempCurrent; // 记录满足条件的温度
           flag = true;
           System.out.println("[倒序查找] ★ 命中! 温度=" + tempCurrent + ", 更新lastFoundTemp");
@@ -443,10 +449,46 @@ public class BaiscApplication {
       if (!flag) {
         System.out.println("[倒序查找] 未找到满足条件的温度，共迭代" + iterCount + "次");
       }
+      // ===== 最优解筛选 =====
+      groupIndex++;
+      if (!groupHits.isEmpty()) {
+        double midValue = (fanweiStart + fanweiEnd) / 2.0;
+        double[] best = groupHits.get(0);
+        double bestDiff = Math.abs(best[1] - midValue);
+        for (int i = 1; i < groupHits.size(); i++) {
+          double diff = Math.abs(groupHits.get(i)[1] - midValue);
+          if (diff < bestDiff || (diff == bestDiff && groupHits.get(i)[0] > best[0])) {
+            best = groupHits.get(i);
+            bestDiff = diff;
+          }
+        }
+        System.out.println("[最优解] 第" + groupIndex + "组: 范围中间值=" + NumberUtil.round(midValue, 4)
+            + ", 最接近命中: g/kg=" + best[1] + "(温度=" + best[0] + "°C), 差值=" + NumberUtil.round(bestDiff, 4));
+        // 将最优解温度重新填入网页，采集完整数据
+        fillInput(driver, Reactivation, StrUtil.toString(best[0]));
+        click(button);
+        ThreadUtil.safeSleep(1500);
+        List<Object> bestRow = collectRowData(driver, linesNumber);
+        bestRow.add(NumberUtil.round(midValue, 4)); // 额外列：范围中间值
+        bestResults.add(bestRow);
+      } else {
+        System.out.println("[最优解] 第" + groupIndex + "组: 无命中记录，跳过");
+      }
       System.out.println("Datas:" + ss);
       ThreadUtil.safeSleep(1000);
     }
     excelWriter.flush();
+    // ===== 输出最优解汇总到 result_best.xlsx =====
+    ExcelWriter bestWriter = ExcelUtil.getWriter(workDir + sep + "result_best.xlsx", sheetName);
+    List<String> bestHeader = Lists.newArrayList("序号", " Wet Air:", "", "", "", "", "Process left", "", "", "", "", "", "", "Process Right",
+        "", "", "", "", "", "Reactivation", "", "", "", "", "", "RPH", "范围中间值");
+    bestWriter.writeHeadRow(bestHeader);
+    for (List<Object> row : bestResults) {
+      bestWriter.writeRow(row);
+    }
+    bestWriter.flush();
+    System.out.println("\n===== 最优解汇总完成 =====");
+    System.out.println("共" + bestResults.size() + "组最优解，已写入: " + workDir + sep + "result_best.xlsx");
     System.out.println("总数据:" + ss);
   }
 
@@ -465,6 +507,33 @@ public class BaiscApplication {
       }
 
     }
+  }
+
+  /**
+   * 采集当前网页上所有结果字段，返回一行数据（与 toList 列顺序一致，不含中间值）
+   */
+  private static List<Object> collectRowData(WebDriver driver, String lineNumber) {
+    List<Object> row = new ArrayList<>();
+    row.add(lineNumber);
+    // Wet Air (5 fields)
+    for (int i = 1; i <= 5; i++) {
+      row.add(driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[" + i + "]/div/div/input")).getAttribute("value"));
+    }
+    // Process left (7 fields)
+    for (int i = 1; i <= 7; i++) {
+      row.add(driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[" + i + "]/div/div/input")).getAttribute("value"));
+    }
+    // Process right (6 fields)
+    for (int i = 1; i <= 6; i++) {
+      row.add(driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[" + i + "]/div/div/input")).getAttribute("value"));
+    }
+    // Reactivation (7 fields)
+    for (int i = 1; i <= 7; i++) {
+      row.add(driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[" + i + "]/div/div/input")).getAttribute("value"));
+    }
+    // RPH (1 field)
+    row.add(driver.findElement(By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[8]/div/div[2]/div/div/div/div/input")).getAttribute("value"));
+    return row;
   }
 
   public static void toList(WebDriver driver, StringBuilder ss, String lineNumber, ExcelWriter excelWriter) {
