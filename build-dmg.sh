@@ -6,7 +6,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
 APP_NAME="Procalc5"
-APP_VERSION="1.0.0"
+APP_VERSION="1.1.0"
 FAT_JAR="procalc5-app.jar"
 MAIN_CLASS="com.sd.discovery.single.Procalc5App"
 OUTPUT_DIR="$PROJECT_DIR/dist"
