@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="PIJDBCDriver">
+    <CLASSES>
+      <root url="jar://C:/Program Files/PIPC/JDBC/PIJDBCDriver.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
