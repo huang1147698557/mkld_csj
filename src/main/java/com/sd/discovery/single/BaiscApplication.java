@@ -64,9 +64,10 @@ public class BaiscApplication {
   }
 
   private static void fillInput(WebDriver driver, WebElement el, String value) {
-    el.click();
     ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
       "var el = arguments[0];" +
+      "el.click();" +
+      "el.focus();" +
       "var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;" +
       "nativeInputValueSetter.call(el, arguments[1]);" +
       "el.dispatchEvent(new Event('input', { bubbles: true }));" +
@@ -413,25 +414,47 @@ public class BaiscApplication {
       List<double[]> groupHits = new ArrayList<>(); // [温度, g/kg]
       while (NumberUtil.compare(tempCurrent, searchLower) >= 0) {
         iterCount++;
-        fillInput(driver, Reactivation, StrUtil.toString(tempCurrent));
+        try {
+          // 尝试关闭可能存在的遮罩层(MUI Backdrop/Dialog)
+          ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+            "var backdrop = document.querySelector('.MuiBackdrop-root');" +
+            "if(backdrop && getComputedStyle(backdrop).opacity > 0) { backdrop.click(); }"
+          );
+          ThreadUtil.safeSleep(300);
+          fillInput(driver, Reactivation, StrUtil.toString(tempCurrent));
+        } catch (Exception e) {
+          System.out.println("[倒序查找] 填充温度失败: " + e.getMessage());
+          tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc);
+          continue;
+        }
         try {
           click(button);
         } catch (Exception e) {
           System.out.println(e.getMessage());
         }
         ThreadUtil.safeSleep(1500);
-        if (StrUtil.isEmpty(gkg.getAttribute("value"))) {
+        String gkgValue;
+        try {
+          gkgValue = gkg.getAttribute("value");
+        } catch (Exception e) {
+          System.out.println("[倒序查找] 获取g/kg值失败: " + e.getMessage());
+          emptyCount++;
+          if (emptyCount >= MAX_EMPTY) break;
+          tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc);
+          continue;
+        }
+        if (StrUtil.isEmpty(gkgValue)) {
           emptyCount++;
           System.out.println("[倒序查找] gkg为空(连续第" + emptyCount + "次)，继续查找...");
           if (emptyCount >= MAX_EMPTY) {
             System.out.println("[倒序查找] 连续" + MAX_EMPTY + "次空值，中断查找");
             break;
           }
-          tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc); // 跳过当前继续
+          tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc);
           continue;
         }
         emptyCount = 0; // 有值则重置空值计数
-        Double gkgTemp = Double.parseDouble(gkg.getAttribute("value"));
+        Double gkgTemp = Double.parseDouble(gkgValue);
         System.out.println("[倒序查找] 温度=" + tempCurrent + ", g/kg=" + gkgTemp + ", 范围=[" + fanweiStart + "~" + fanweiEnd + "]");
         if (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd) {
           toList(driver, ss, linesNumber, excelWriter);
