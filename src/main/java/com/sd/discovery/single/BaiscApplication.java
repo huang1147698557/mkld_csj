@@ -96,6 +96,7 @@ public class BaiscApplication {
         "", "", "", "", "", "Reactivation", "", "", "", "", "", "", "RPH"));
     //登陆成功
     List<List<Object>> paraList = ExcelUtil.getReader(workDir + sep + "procalc5.proflute.xlsx").read();
+    Double lastFoundTemp = null; // 跨行保持上一轮找到的温度值，用于下一轮倒序查找上限
     for (List<Object> list : paraList) {
       if (paraList.indexOf(list) == 0) {
         continue;
@@ -389,10 +390,23 @@ public class BaiscApplication {
         ReactivationStartReal = ReactivationStart;
         ReactivationEndReal = ReactivationEnd;
       }
+      // ===== 倒序查找 Reactivation 温度 =====
+      // 确定本轮查找上限：优先使用上一行找到的温度，否则使用 ReactivationEndReal
+      Double searchUpper = (lastFoundTemp != null) ? Math.min(lastFoundTemp, ReactivationEndReal) : ReactivationEndReal;
+      Double searchLower = ReactivationStartReal;
+      System.out.println("[倒序查找] searchLower=" + searchLower + ", searchUpper=" + searchUpper + ", 步长=" + Reactivationbc);
+
+      if (NumberUtil.compare(searchUpper, searchLower) < 0) {
+        System.out.println("[倒序查找] 上限小于下限，跳过本行");
+        continue;
+      }
+
       flag = false;
-      Double templeft = ReactivationStartReal.doubleValue();
-      while (templeft <= ReactivationEndReal.doubleValue()) {
-        fillInput(driver, Reactivation, StrUtil.toString(templeft));
+      Double tempCurrent = searchUpper; // 从上限开始倒序
+      int iterCount = 0;
+      while (NumberUtil.compare(tempCurrent, searchLower) >= 0) {
+        iterCount++;
+        fillInput(driver, Reactivation, StrUtil.toString(tempCurrent));
         try {
           click(button);
         } catch (Exception e) {
@@ -400,20 +414,25 @@ public class BaiscApplication {
         }
         ThreadUtil.safeSleep(1500);
         if (StrUtil.isEmpty(gkg.getAttribute("value"))) {
+          System.out.println("[倒序查找] gkg为空，中断");
           break;
-        }
-        if (StrUtil.isEmpty(gkg.getAttribute("value"))) {
-          continue;
         }
         Double gkgTemp = Double.parseDouble(gkg.getAttribute("value"));
+        System.out.println("[倒序查找] 温度=" + tempCurrent + ", g/kg=" + gkgTemp + ", 范围=[" + fanweiStart + "~" + fanweiEnd + "]");
         if (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd) {
           toList(driver, ss, linesNumber, excelWriter);
+          lastFoundTemp = tempCurrent; // 记录满足条件的温度
           flag = true;
+          System.out.println("[倒序查找] ★ 命中! 温度=" + tempCurrent + ", 更新lastFoundTemp");
         }
-        templeft = NumberUtil.add(templeft, Reactivationbc);
+        tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc); // 倒序递减
         if (flag && !(fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd)) {
+          System.out.println("[倒序查找] 已离开范围，结束查找，共迭代" + iterCount + "次");
           break;
         }
+      }
+      if (!flag) {
+        System.out.println("[倒序查找] 未找到满足条件的温度，共迭代" + iterCount + "次");
       }
       System.out.println("Datas:" + ss);
       ThreadUtil.safeSleep(1000);
