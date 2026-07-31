@@ -493,18 +493,17 @@ public class MainController {
                     final Double gkgVal = Double.parseDouble(gkgValue);
                     appendLog("[迭代] 温度=" + tempCurrent + "°C → g/kg=" + gkgVal + " (范围:" + fanweiStart + "~" + fanweiEnd + ")", "");
 
-                    if (fanweiStart <= gkgVal && gkgVal <= fanweiEnd) {
-                        toListSelenium(driver, ss, linesNumber, currentExcelWriter, sessionTimeDisplay, true);
-                        appendLog("[数据采集] 已写入第" + writerRowIndex + "行", "");
+                    boolean isHit = (fanweiStart <= gkgVal && gkgVal <= fanweiEnd);
+                    toListSelenium(driver, ss, linesNumber, currentExcelWriter, sessionTimeDisplay, isHit);
+
+                    if (isHit) {
+                        appendLog("[数据采集] 命中! 已写入第" + writerRowIndex + "行", "hit");
                         groupHits.add(new double[]{tempCurrent, gkgVal});
                         lastFoundTemp = tempCurrent;
                         flag = true;
                         hitCount.incrementAndGet();
                         final Double curTemp = tempCurrent;
-                        Platform.runLater(() -> {
-                            statHits.setText(String.valueOf(hitCount.get()));
-                            appendLog("★ 命中! 温度=" + curTemp + ", g/kg=" + gkgVal, "hit");
-                        });
+                        Platform.runLater(() -> statHits.setText(String.valueOf(hitCount.get())));
                     }
                     tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc);
                     if (flag && !(fanweiStart <= gkgVal && gkgVal <= fanweiEnd)) break;

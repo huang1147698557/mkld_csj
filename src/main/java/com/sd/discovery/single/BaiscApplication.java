@@ -497,8 +497,9 @@ public class BaiscApplication {
         emptyCount = 0; // 有值则重置空值计数
         Double gkgTemp = Double.parseDouble(gkgValue);
         System.out.println("[倒序查找] 温度=" + tempCurrent + ", g/kg=" + gkgTemp + ", 范围=[" + fanweiStart + "~" + fanweiEnd + "]");
-        if (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd) {
-          toList(driver, ss, linesNumber, excelWriter, sessionTimeDisplay, true);
+        boolean isHit = (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd);
+        toList(driver, ss, linesNumber, excelWriter, sessionTimeDisplay, isHit);
+        if (isHit) {
           groupHits.add(new double[]{tempCurrent, gkgTemp}); // 记录命中
           lastFoundTemp = tempCurrent; // 记录满足条件的温度
           flag = true;
