@@ -47,8 +47,7 @@ public class MainController {
     @FXML private Label statGroups, statHits, statBest, statTime;
     @FXML private ProgressBar progressBar;
     @FXML private Label progressLabel, progressPercent;
-    @FXML private ScrollPane logScrollPane;
-    @FXML private VBox logContainer;
+    @FXML private TextArea logTextArea;
 
     // ===== 状态 =====
     private File selectedFile;
@@ -57,11 +56,18 @@ public class MainController {
     private Thread workerThread;
     private long startTime;
     private String sessionStartTime;
+    private String sessionTimeDisplay;
     private int writerRowIndex = 1;
     private final AtomicInteger groupCount = new AtomicInteger(0);
     private final AtomicInteger hitCount = new AtomicInteger(0);
     private final AtomicInteger bestCount = new AtomicInteger(0);
     private int totalGroups = 0;
+    // 停止时保存数据用
+    private ExcelWriter currentExcelWriter;
+    private List<List<Object>> currentBestResults;
+    private String currentAllFilePath;
+    private String currentBestFilePath;
+    private int currentGroupIdx = 0;
 
     private static final String CRED_FILE = System.getProperty("user.home") + "/procalc5/.credentials";
     private static final String DEFAULT_URL = "https://procalc5.proflute.se/rotor";
@@ -199,11 +205,25 @@ public class MainController {
     @FXML
     public void onStart() {
         if (running.get()) {
-            running.set(false);
-            if (workerThread != null) workerThread.interrupt();
-            startBtn.setText("▶  开始运行");
-            startBtn.setStyle(startBtn.getStyle().replace("#ff3b30", "#0071e3"));
-            appendLog("⏹ 用户手动停止", "warn");
+            // 弹出确认对话框
+            Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+            alert.setTitle("停止运行");
+            alert.setHeaderText("确定要停止运行吗？");
+            alert.setContentText(String.format("已完成 %d 组，命中 %d 条，最优解 %d 个。\n是否保存已采集的数据？",
+                currentGroupIdx, hitCount.get(), bestCount.get()));
+            ButtonType saveBtn = new ButtonType("保存并停止");
+            ButtonType discardBtn = new ButtonType("直接停止");
+            ButtonType cancelBtn = new ButtonType("取消", ButtonBar.ButtonData.CANCEL_CLOSE);
+            alert.getButtonTypes().setAll(saveBtn, discardBtn, cancelBtn);
+            alert.showAndWait().ifPresent(response -> {
+                if (response == cancelBtn) return;
+                running.set(false);
+                if (response == saveBtn) saveDataOnStop();
+                if (workerThread != null) workerThread.interrupt();
+                startBtn.setText("▶  开始运行");
+                startBtn.setStyle(startBtn.getStyle().replace("#ff3b30", "#0071e3"));
+                appendLog("⏹ 用户手动停止", "warn");
+            });
             return;
         }
 
@@ -224,7 +244,8 @@ public class MainController {
         startTime = System.currentTimeMillis();
         startBtn.setText("⏹  停止运行");
         startBtn.setStyle(startBtn.getStyle().replace("#0071e3", "#ff3b30"));
-        logContainer.getChildren().clear();
+        logTextArea.clear();
+        startOutputRedirect();
         appendLog("程序启动，工作目录: " + workDir, "info");
 
         workerThread = new Thread(() -> {
@@ -272,21 +293,21 @@ public class MainController {
 
         WebDriver driver = null;
         try {
-            Platform.runLater(() -> appendLog("正在启动 Chrome...", "info"));
+            appendLog("正在启动 Chrome...", "info");
             ChromeOptions options = new ChromeOptions();
             options.addArguments("--start-maximized");
             driver = new ChromeDriver(options);
-            Platform.runLater(() -> appendLog("浏览器启动成功", "info"));
+            appendLog("浏览器启动成功", "info");
 
             // 登录
-            Platform.runLater(() -> appendLog("正在打开网页...", "info"));
+            appendLog("正在打开网页...", "info");
             driver.get(DEFAULT_URL);
             ThreadUtil.safeSleep(8000);
             driver.findElement(By.id("userNameInput")).sendKeys(username);
             driver.findElement(By.id("passwordInput")).sendKeys(password);
             driver.findElement(By.id("submitButton")).click();
             ThreadUtil.safeSleep(5000);
-            Platform.runLater(() -> appendLog("登录成功", "info"));
+            appendLog("登录成功", "info");
 
             // 等待表单加载
             try {
@@ -295,39 +316,40 @@ public class MainController {
                     && System.currentTimeMillis() < deadline) ThreadUtil.safeSleep(200);
                 if (driver.findElements(By.cssSelector("input[type='radio']")).isEmpty()) throw new RuntimeException("form not ready");
             } catch (Exception e) {
-                Platform.runLater(() -> appendLog("等待表单超时，继续...", "warn"));
+                appendLog("等待表单超时，继续...", "warn");
             }
             ThreadUtil.safeSleep(2000);
 
             // Excel 初始化
-            sessionStartTime = DateUtil.format(DateUtil.date(), "yyyyMMddHHmmss");
-            String allFilePath = workDir + sep + "calculate_results_all.xlsx";
-            File allFile = new File(allFilePath);
+            sessionStartTime = DateUtil.format(DateUtil.date(), "yyyyMMdd_HHmmss");
+            sessionTimeDisplay = DateUtil.format(DateUtil.date(), "yyyy年M月d日H时m分");
+            currentAllFilePath = workDir + sep + "calculate_results_all.xlsx";
+            currentBestFilePath = workDir + sep + sessionStartTime + "_result_02.xlsx";
+            File allFile = new File(currentAllFilePath);
             List<String> header = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
                 "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
                 "", "", "", "", "", "", "RPH");
-            ExcelWriter excelWriter;
             if (allFile.exists()) {
-                int existingCount = ExcelUtil.getReader(allFilePath).read().size();
-                excelWriter = ExcelUtil.getWriter(allFilePath);
+                int existingCount = ExcelUtil.getReader(currentAllFilePath).read().size();
+                currentExcelWriter = ExcelUtil.getWriter(currentAllFilePath);
                 writerRowIndex = existingCount + 1;
             } else {
-                excelWriter = ExcelUtil.getWriter(allFilePath);
-                excelWriter.writeHeadRow(header);
+                currentExcelWriter = ExcelUtil.getWriter(currentAllFilePath);
+                currentExcelWriter.writeHeadRow(header);
                 writerRowIndex = 1;
             }
 
             List<List<Object>> paraList = ExcelUtil.getReader(selectedFile.getAbsolutePath()).read();
             Double lastFoundTemp = null;
-            List<List<Object>> bestResults = new ArrayList<>();
-            int groupIdx = 0;
+            currentBestResults = new ArrayList<>();
+            currentGroupIdx = 0;
 
             for (List<Object> list : paraList) {
                 if (!running.get()) break;
                 if (paraList.indexOf(list) == 0) continue;
 
-                groupIdx++;
-                final int gIdx = groupIdx;
+                currentGroupIdx++;
+                final int gIdx = currentGroupIdx;
                 Platform.runLater(() -> {
                     statGroups.setText(gIdx + "/" + totalGroups);
                     progressLabel.setText("正在处理第 " + gIdx + " 组...");
@@ -382,18 +404,21 @@ public class MainController {
                 String buttonXpath = "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[9]/div[3]/button";
 
                 // 边界值检查
+                appendLog("[边界检查] 第" + gIdx + "组 起始: React=" + ReactivationStart, "");
                 fillInputByXpath(driver, reactXpath, ReactivationStart.toString());
                 clickByXpath(driver, buttonXpath);
                 ThreadUtil.safeSleep(1500);
                 String gkgStartVal = getInputValueByXpath(driver, gkgXpath);
-                if (StrUtil.isEmpty(gkgStartVal)) continue;
+                appendLog("[边界检查] React=" + ReactivationStart + " → g/kg=" + gkgStartVal, "");
+                if (StrUtil.isEmpty(gkgStartVal)) { appendLog("[边界检查] 起始值为空，跳过本组", "warn"); continue; }
                 Double gkgLeft = Double.parseDouble(gkgStartVal);
 
                 fillInputByXpath(driver, reactXpath, ReactivationEnd.toString());
                 clickByXpath(driver, buttonXpath);
                 ThreadUtil.safeSleep(1500);
                 String gkgEndVal = getInputValueByXpath(driver, gkgXpath);
-                if (StrUtil.isEmpty(gkgEndVal)) continue;
+                appendLog("[边界检查] React=" + ReactivationEnd + " → g/kg=" + gkgEndVal, "");
+                if (StrUtil.isEmpty(gkgEndVal)) { appendLog("[边界检查] 结束值为空，跳过本组", "warn"); continue; }
 
                 boolean qk1 = (fanweiStart <= gkgLeft && gkgLeft <= fanweiEnd);
                 Double ReactivationStartReal = ReactivationStart;
@@ -466,9 +491,11 @@ public class MainController {
                     }
                     emptyCount = 0;
                     final Double gkgVal = Double.parseDouble(gkgValue);
+                    appendLog("[迭代] 温度=" + tempCurrent + "°C → g/kg=" + gkgVal + " (范围:" + fanweiStart + "~" + fanweiEnd + ")", "");
 
                     if (fanweiStart <= gkgVal && gkgVal <= fanweiEnd) {
-                        toListSelenium(driver, ss, linesNumber, excelWriter, sessionStartTime, true);
+                        toListSelenium(driver, ss, linesNumber, currentExcelWriter, sessionTimeDisplay, true);
+                        appendLog("[数据采集] 已写入第" + writerRowIndex + "行", "");
                         groupHits.add(new double[]{tempCurrent, gkgVal});
                         lastFoundTemp = tempCurrent;
                         flag = true;
@@ -503,41 +530,26 @@ public class MainController {
                     clickByXpath(driver, buttonXpath);
                     ThreadUtil.safeSleep(1500);
                     List<Object> bestRow = collectRowDataSelenium(driver, linesNumber);
-                    bestRow.add(1, sessionStartTime);
+                    appendLog("[最优解写入] 采集到" + bestRow.size() + "个字段", "");
+                    bestRow.add(1, sessionTimeDisplay);
                     bestRow.add(NumberUtil.round(midValue, 4));
                     int bestRowIdx = writerRowIndex++;
-                    excelWriter.writeRow(bestRow);
-                    applyRowStyle(excelWriter, bestRowIdx, bestRow.size(), true, true);
-                    bestResults.add(bestRow);
+                    currentExcelWriter.writeRow(bestRow);
+                    applyRowStyle(currentExcelWriter, bestRowIdx, bestRow.size(), true, true);
+                    currentBestResults.add(bestRow);
                     bestCount.incrementAndGet();
                     Platform.runLater(() -> statBest.setText(String.valueOf(bestCount.get())));
                 }
             }
 
             // 写入文件
-            excelWriter.flush();
-            String bestFilePath = workDir + sep + sessionStartTime + "_result_02.xlsx";
-            if (!bestResults.isEmpty()) {
-                ExcelWriter bestWriter = ExcelUtil.getWriter(bestFilePath);
-                List<String> bestHeader = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
-                    "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
-                    "", "", "", "", "", "", "RPH", "范围中间值");
-                bestWriter.writeHeadRow(bestHeader);
-                int bestIdx = 1;
-                for (List<Object> row : bestResults) {
-                    bestWriter.writeRow(row);
-                    applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
-                    bestIdx++;
-                }
-                bestWriter.flush();
-            }
-            final String finalBestPath = bestFilePath;
-            final int finalGroupCount = groupIdx;
+            saveResults();
+            final int finalGroupCount = currentGroupIdx;
+            appendLog("===== 运行完成 =====", "info");
+            appendLog("共 " + finalGroupCount + " 组, " + hitCount.get() + " 条有效数据, " + bestCount.get() + " 个最优解", "info");
+            appendLog("全量数据已追加到: " + currentAllFilePath, "info");
+            appendLog("最优解已写入: " + currentBestFilePath, "info");
             Platform.runLater(() -> {
-                appendLog("===== 运行完成 =====", "info");
-                appendLog("共 " + finalGroupCount + " 组, " + hitCount.get() + " 条有效数据, " + bestCount.get() + " 个最优解", "info");
-                appendLog("全量数据已追加到: " + allFilePath, "info");
-                appendLog("最优解已写入: " + finalBestPath, "info");
                 progressBar.setProgress(1.0);
                 progressLabel.setText("运行完成");
                 progressPercent.setText("100%");
@@ -547,6 +559,57 @@ public class MainController {
             Platform.runLater(() -> appendLog("❌ " + e.getMessage(), "error"));
         } finally {
             if (driver != null) try { driver.quit(); } catch (Exception e) {}
+        }
+    }
+
+    // ===== 数据保存 =====
+    private void saveResults() {
+        try {
+            if (currentExcelWriter != null) currentExcelWriter.flush();
+            if (currentBestResults != null && !currentBestResults.isEmpty()) {
+                String sep = System.getProperty("os.name").toLowerCase().contains("win") ? "\\" : "/";
+                ExcelWriter bestWriter = ExcelUtil.getWriter(currentBestFilePath);
+                List<String> bestHeader = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
+                    "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
+                    "", "", "", "", "", "", "RPH", "范围中间值");
+                bestWriter.writeHeadRow(bestHeader);
+                int bestIdx = 1;
+                for (List<Object> row : currentBestResults) {
+                    bestWriter.writeRow(row);
+                    applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
+                    bestIdx++;
+                }
+                bestWriter.flush();
+            }
+        } catch (Exception e) {
+            appendLog("保存结果失败: " + e.getMessage(), "error");
+        }
+    }
+
+    private void saveDataOnStop() {
+        try {
+            if (currentExcelWriter != null) {
+                currentExcelWriter.flush();
+                appendLog("全量数据已保存到: " + currentAllFilePath, "info");
+            }
+            if (currentBestResults != null && !currentBestResults.isEmpty()) {
+                ExcelWriter bestWriter = ExcelUtil.getWriter(currentBestFilePath);
+                List<String> bestHeader = Lists.newArrayList("序号", "计算时间", " Wet Air:", "", "", "", "", "Process left",
+                    "", "", "", "", "", "", "Process Right", "", "", "", "", "", "Reactivation",
+                    "", "", "", "", "", "", "RPH", "范围中间值");
+                bestWriter.writeHeadRow(bestHeader);
+                int bestIdx = 1;
+                for (List<Object> row : currentBestResults) {
+                    bestWriter.writeRow(row);
+                    applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
+                    bestIdx++;
+                }
+                bestWriter.flush();
+                appendLog("最优解已保存到: " + currentBestFilePath, "info");
+            }
+            appendLog("数据保存完成 (" + hitCount.get() + "条数据, " + bestCount.get() + "个最优解)", "info");
+        } catch (Exception e) {
+            appendLog("保存数据失败: " + e.getMessage(), "error");
         }
     }
 
@@ -562,6 +625,8 @@ public class MainController {
         String base = "//*[@id=\"root\"]/div/div/div[1]/div[1]/div[1]/div[1]/div/div/div";
 
         // 范围1
+        appendLog("[范围1] Units=" + UnitsofMeasure + ", Humidity=" + RelativeHumidity + ", WetBulb=" + WetBulb
+            + ", Pressure=" + Pressurealtitud + "(" + PressurealtitudV + ")", "");
         if (StrUtil.equalsIgnoreCase(UnitsofMeasure, "si")) {
             clickByXpath(page, base + "/div[1]/div/label[1]/span/input");
         } else {
@@ -579,6 +644,8 @@ public class MainController {
             clickByXpath(page, base + "/div[3]/div/div[1]/label[2]/span/input");
         }
         fillInputByXpath(page, base + "/div[3]/div/div[2]/input", PressurealtitudV);
+        appendLog("[范围1] Bypass=" + Showbypass + ", ReactType=" + Reactivationinputtype
+            + ", AirflowRange=" + AirflowRange + ", DewpointRange=" + Dewpointrange, "");
         if (StrUtil.equalsIgnoreCase(Showbypass, "No")) {
             clickByXpath(page, base + "/div[4]/div/div/label[1]/span/input");
         } else {
@@ -604,6 +671,7 @@ public class MainController {
         ThreadUtil.safeSleep(500);
         // 获取下拉选项
         List<String> psfOptions = getOptionTexts(page);
+        appendLog("[下拉] Performance Safety Factor: " + Performancesafetyfactor + " (选项:" + psfOptions + ")", "");
         boolean selected = false;
         if (StrUtil.equalsIgnoreCase(Performancesafetyfactor, "None")) { selectOptionByIndex(page, 0); selected = true; }
         else if (StrUtil.equalsIgnoreCase(Performancesafetyfactor, "+Δ% Moisture")) { selectOptionByIndex(page, 1); selected = true; }
@@ -613,20 +681,24 @@ public class MainController {
             clickByXpath(page, base + "/div[8]/div/div/div[2]/div/div");
             ThreadUtil.safeSleep(500);
             selectOptionByDataValue(page, PerformancesafetyfactorV);
+            appendLog("[下拉] Safety Factor Value=" + PerformancesafetyfactorV, "");
         }
 
         // 范围2
         String base2 = "//*[@id=\"root\"]/div/div/div[1]/div[1]/div[1]/div[2]/div/div/div";
         fillInputByXpath(page, base2 + "/div[1]/div/div[2]/input", ProcessAirflow);
+        appendLog("[范围2] ProcessAirflow=" + ProcessAirflow, "");
         // Media
         clickByXpath(page, base2 + "/div[3]/div/div[2]");
         ThreadUtil.safeSleep(1000);
         selectMediaOption(page, DesiccantNedia);
+        appendLog("[下拉] Media=" + DesiccantNedia, "");
         // Sector Layout
         Platform.runLater(() -> appendLog("[Sector Layout] " + SectorLayout, ""));
         clickByXpath(page, base2 + "/div[4]/div/div[2]");
         ThreadUtil.safeSleep(1500);
         selectOptionByText(page, SectorLayout, 3);
+        appendLog("[下拉] Sector Layout 已选择: " + SectorLayout, "");
         verifySelectedText(driver, "Sector Layout", base2 + "/div[4]/div/div[2]", SectorLayout);
         // Rotor diameter/depth
         boolean isCustomSector = StrUtil.equalsAnyIgnoreCase(SectorLayout, "Custom 2-sector", "Custom 3 sector");
@@ -638,6 +710,7 @@ public class MainController {
                     clickByXpath(page, base2 + "/div[6]/div/div[2]");
                     ThreadUtil.safeSleep(1000);
                     selectOptionByDataValue(page, RotorDiameter);
+                    appendLog("[下拉] Rotor Diameter=" + RotorDiameter, "");
                     break;
                 } catch (Exception e) { ThreadUtil.safeSleep(1000); }
             }
@@ -650,6 +723,7 @@ public class MainController {
                     clickByXpath(page, base2 + "/div[7]/div/div[2]");
                     ThreadUtil.safeSleep(1000);
                     selectOptionByDataValue(page, RotorDepth);
+                    appendLog("[下拉] Rotor Depth=" + RotorDepth, "");
                     break;
                 } catch (Exception e) { ThreadUtil.safeSleep(1000); }
             }
@@ -658,6 +732,7 @@ public class MainController {
         clickByXpath(page, base2 + "/div[8]/div/div[2]");
         ThreadUtil.safeSleep(1000);
         selectNetFaceArea(page, NetFaceAreaCalculation);
+        appendLog("[下拉] Net Face Area=" + NetFaceAreaCalculation + ", SealingArea=" + SealingArea, "");
         fillInputByXpath(page, base2 + "/div[9]/div/div[2]/input", SealingArea);
         // 底部参数
         Platform.runLater(() -> appendLog("[填充值] C=" + ProcessStrC + ", GKG=" + ProcessStrGKG + ", Rph=" + Rph, ""));
@@ -673,6 +748,8 @@ public class MainController {
         fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[5]/div/div[2]/div/div[1]/div/div/input", Reactivation1);
         fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[5]/div/div[2]/div/div[2]/div/div/input", Reactivation2);
         fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[5]/div/div[2]/div/div[5]/div/div/input", Reactivation3);
+        appendLog("[填充] Reactivation: " + Reactivation1 + ", " + Reactivation2 + ", " + Reactivation3, "");
+        appendLog("[参数设置完成] 所有参数已填充到网页", "info");
     }
 
     // ===== Selenium 辅助方法 =====
@@ -816,20 +893,61 @@ public class MainController {
 
     @FXML
     public void onClearLog() {
-        logContainer.getChildren().clear();
+        logTextArea.clear();
+    }
+
+    @FXML
+    public void onCopyLog() {
+        String text = logTextArea.getSelectedText();
+        if (text != null && !text.isEmpty()) {
+            javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
+            javafx.scene.input.ClipboardContent content = new javafx.scene.input.ClipboardContent();
+            content.putString(text);
+            clipboard.setContent(content);
+            return;
+        }
+        logTextArea.selectAll();
+        logTextArea.copy();
+        logTextArea.deselect();
+    }
+
+    private void startOutputRedirect() {
+        final OutputStream logStream = new OutputStream() {
+            private final StringBuilder lineBuffer = new StringBuilder();
+            @Override
+            public void write(int b) {
+                if (b == '\n') {
+                    final String line = lineBuffer.toString().trim();
+                    lineBuffer.setLength(0);
+                    if (!line.isEmpty()) {
+                        Platform.runLater(() -> {
+                            logTextArea.appendText(line + "\n");
+                            logTextArea.setScrollTop(Double.MAX_VALUE);
+                        });
+                    }
+                } else if (b != '\r') {
+                    lineBuffer.append((char) b);
+                }
+            }
+        };
+        System.setOut(new PrintStream(logStream, true));
+        System.setErr(new PrintStream(logStream, true));
     }
 
     private void appendLog(String msg, String type) {
         Platform.runLater(() -> {
-            Label label = new Label(msg);
-            label.setStyle("-fx-font-family: monospace; -fx-font-size: 11; -fx-wrap-text: false;");
-            if ("hit".equals(type)) label.setStyle(label.getStyle() + " -fx-text-fill: #34c759;");
-            else if ("warn".equals(type)) label.setStyle(label.getStyle() + " -fx-text-fill: #ff9500;");
-            else if ("error".equals(type)) label.setStyle(label.getStyle() + " -fx-text-fill: #ff3b30;");
-            else if ("info".equals(type)) label.setStyle(label.getStyle() + " -fx-text-fill: #007aff;");
-            logContainer.getChildren().add(label);
-            logScrollPane.layout();
-            logScrollPane.setVvalue(1.0);
+            String prefix;
+            if ("hit".equals(type)) prefix = "✓ ";
+            else if ("warn".equals(type)) prefix = "⚠ ";
+            else if ("error".equals(type)) prefix = "✗ ";
+            else if ("info".equals(type)) prefix = "● ";
+            else prefix = "  ";
+            String time = String.format("[%02d:%02d:%02d] ",
+                (int)((System.currentTimeMillis() - startTime) / 3600000),
+                (int)(((System.currentTimeMillis() - startTime) / 60000) % 60),
+                (int)(((System.currentTimeMillis() - startTime) / 1000) % 60));
+            logTextArea.appendText(time + prefix + msg + "\n");
+            logTextArea.setScrollTop(Double.MAX_VALUE);
         });
     }
 }

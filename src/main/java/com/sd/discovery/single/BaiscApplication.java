@@ -37,7 +37,8 @@ public class BaiscApplication {
   // 默认工作目录：Windows=C:\procalc5，Mac/Linux=用户目录下的procalc5
   private static String workDir;
   private static String inputFile; // 自定义输入文件路径（--input=），为空时使用默认
-  private static String sessionStartTime; // 本次会话时间戳 yyyyMMddHHmmss
+  private static String sessionStartTime; // 本次会话时间戳，用于文件名
+  private static String sessionTimeDisplay; // 可读时间格式，用于Excel单元格
   private static int writerRowIndex = 1;  // 当前写入行索引（用于追加写入）
 
   static {
@@ -101,7 +102,8 @@ public class BaiscApplication {
     options.addArguments("--no-sandbox");
     options.addArguments("--disable-dev-shm-usage");
     WebDriver driver = new ChromeDriver(options);
-    sessionStartTime = DateUtil.format(DateUtil.date(), "yyyyMMddHHmmss");
+    sessionStartTime = DateUtil.format(DateUtil.date(), "yyyyMMdd_HHmmss");
+    sessionTimeDisplay = DateUtil.format(DateUtil.date(), "yyyy年M月d日H时m分");
     driver.get("https://procalc5.proflute.se/rotor");
     WebElement username = waitForVisibleElement(driver, "用户名输入框",
         By.id("userNameInput"), By.id("username"), By.name("username"),
@@ -496,7 +498,7 @@ public class BaiscApplication {
         Double gkgTemp = Double.parseDouble(gkgValue);
         System.out.println("[倒序查找] 温度=" + tempCurrent + ", g/kg=" + gkgTemp + ", 范围=[" + fanweiStart + "~" + fanweiEnd + "]");
         if (fanweiStart <= gkgTemp && gkgTemp <= fanweiEnd) {
-          toList(driver, ss, linesNumber, excelWriter, sessionStartTime, true);
+          toList(driver, ss, linesNumber, excelWriter, sessionTimeDisplay, true);
           groupHits.add(new double[]{tempCurrent, gkgTemp}); // 记录命中
           lastFoundTemp = tempCurrent; // 记录满足条件的温度
           flag = true;
@@ -531,7 +533,7 @@ public class BaiscApplication {
         click(button);
         ThreadUtil.safeSleep(1500);
         List<Object> bestRow = collectRowData(driver, linesNumber);
-        bestRow.add(1, sessionStartTime); // 插入时间戳到第2列
+        bestRow.add(1, sessionTimeDisplay); // 插入可读时间到第2列
         bestRow.add(NumberUtil.round(midValue, 4)); // 额外列：范围中间值
         // 写入全量文件（红色+加粗标记最优解）
         int bestRowIdx = writerRowIndex++;
