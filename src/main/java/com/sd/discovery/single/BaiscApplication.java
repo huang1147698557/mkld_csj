@@ -85,6 +85,11 @@ public class BaiscApplication {
   }
 
   private static void test() {
+    String usernameValue = System.getenv("PROCALC_USERNAME");
+    String passwordValue = System.getenv("PROCALC_PASSWORD");
+    if (StrUtil.isBlank(usernameValue) || StrUtil.isBlank(passwordValue)) {
+      throw new IllegalStateException("请设置 PROCALC_USERNAME 和 PROCALC_PASSWORD 环境变量");
+    }
     StringBuilder ss = new StringBuilder();
     ChromeOptions options = new ChromeOptions();
     options.addArguments("--no-sandbox");
@@ -95,8 +100,8 @@ public class BaiscApplication {
     ThreadUtil.safeSleep(8000);
     WebElement username = driver.findElement(By.id("userNameInput"));
     WebElement password = driver.findElement(By.id("passwordInput"));
-    username.sendKeys("EXTCNJANZHA");
-    password.sendKeys("a[d?>9v78ugU");
+    username.sendKeys(usernameValue);
+    password.sendKeys(passwordValue);
     WebElement login = driver.findElement(By.xpath("//*[@id=\"submitButton\"]"));
     login.click();
     ThreadUtil.safeSleep(5000);

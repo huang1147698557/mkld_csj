@@ -8,11 +8,16 @@ import cn.hutool.poi.excel.ExcelUtil;
 import cn.hutool.poi.excel.ExcelWriter;
 import cn.hutool.poi.excel.cell.CellUtil;
 import com.google.common.collect.Lists;
-import com.microsoft.playwright.*;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
+import org.openqa.selenium.By;
+import org.openqa.selenium.JavascriptExecutor;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
@@ -259,48 +264,36 @@ public class MainController {
         statTime.setText(String.format("%02d:%02d", min, sec));
     }
 
-    // ===== 核心自动化逻辑 (Playwright) =====
+    // ===== 核心自动化逻辑 (Selenium，与 start.sh 使用同一浏览器驱动) =====
     private void runAutomation() {
         String sep = System.getProperty("os.name").toLowerCase().contains("win") ? "\\" : "/";
         String username = usernameField.getText().trim();
         String password = passwordField.getText().trim();
 
-        Playwright playwright = null;
-        Browser browser = null;
-        Page page = null;
+        WebDriver driver = null;
         try {
-            // 启动 Playwright 浏览器
-            Platform.runLater(() -> appendLog("正在启动 Playwright 浏览器...", "info"));
-            playwright = Playwright.create();
-            try {
-                browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions()
-                        .setHeadless(false)
-                        .setChannel("chrome")
-                        .setSlowMo(100));
-            } catch (Exception e) {
-                Platform.runLater(() -> appendLog("Chrome channel 失败，使用 Chromium: " + e.getMessage(), "warn"));
-                browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(false).setSlowMo(100));
-            }
-            BrowserContext context = browser.newContext(new Browser.NewContextOptions().setViewportSize(1920, 1080));
-            page = context.newPage();
-            page.setDefaultTimeout(30000);
+            Platform.runLater(() -> appendLog("正在启动 Chrome...", "info"));
+            ChromeOptions options = new ChromeOptions();
+            options.addArguments("--start-maximized");
+            driver = new ChromeDriver(options);
             Platform.runLater(() -> appendLog("浏览器启动成功", "info"));
 
             // 登录
             Platform.runLater(() -> appendLog("正在打开网页...", "info"));
-            page.navigate(DEFAULT_URL);
+            driver.get(DEFAULT_URL);
             ThreadUtil.safeSleep(8000);
-            page.fill("#userNameInput", username);
-            page.fill("#passwordInput", password);
-            page.click("#submitButton");
+            driver.findElement(By.id("userNameInput")).sendKeys(username);
+            driver.findElement(By.id("passwordInput")).sendKeys(password);
+            driver.findElement(By.id("submitButton")).click();
             ThreadUtil.safeSleep(5000);
             Platform.runLater(() -> appendLog("登录成功", "info"));
 
             // 等待表单加载
             try {
-                page.waitForSelector("input[type='radio']", new Page.WaitForSelectorOptions().setTimeout(30000));
+                long deadline = System.currentTimeMillis() + 30000;
+                while (driver.findElements(By.cssSelector("input[type='radio']")).isEmpty()
+                    && System.currentTimeMillis() < deadline) ThreadUtil.safeSleep(200);
+                if (driver.findElements(By.cssSelector("input[type='radio']")).isEmpty()) throw new RuntimeException("form not ready");
             } catch (Exception e) {
                 Platform.runLater(() -> appendLog("等待表单超时，继续...", "warn"));
             }
@@ -375,7 +368,7 @@ public class MainController {
                 String Reactivation3 = StrUtil.toString(list.get(29));
 
                 // 设置网页参数
-                setWebParams(page, UnitsofMeasure, RelativeHumidity, WetBulb, Pressurealtitud,
+                setWebParams(driver, UnitsofMeasure, RelativeHumidity, WetBulb, Pressurealtitud,
                     PressurealtitudV, Showbypass, Reactivationinputtype, AirflowRange, Dewpointrange,
                     Performancesafetyfactor, PerformancesafetyfactorV, ProcessAirflow, DesiccantNedia,
                     SectorLayout, RotorDiameter, RotorDepth, NetFaceAreaCalculation, SealingArea,
@@ -389,17 +382,17 @@ public class MainController {
                 String buttonXpath = "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[9]/div[3]/button";
 
                 // 边界值检查
-                fillInputByXpath(page, reactXpath, ReactivationStart.toString());
-                clickByXpath(page, buttonXpath);
+                fillInputByXpath(driver, reactXpath, ReactivationStart.toString());
+                clickByXpath(driver, buttonXpath);
                 ThreadUtil.safeSleep(1500);
-                String gkgStartVal = getInputValueByXpath(page, gkgXpath);
+                String gkgStartVal = getInputValueByXpath(driver, gkgXpath);
                 if (StrUtil.isEmpty(gkgStartVal)) continue;
                 Double gkgLeft = Double.parseDouble(gkgStartVal);
 
-                fillInputByXpath(page, reactXpath, ReactivationEnd.toString());
-                clickByXpath(page, buttonXpath);
+                fillInputByXpath(driver, reactXpath, ReactivationEnd.toString());
+                clickByXpath(driver, buttonXpath);
                 ThreadUtil.safeSleep(1500);
-                String gkgEndVal = getInputValueByXpath(page, gkgXpath);
+                String gkgEndVal = getInputValueByXpath(driver, gkgXpath);
                 if (StrUtil.isEmpty(gkgEndVal)) continue;
 
                 boolean qk1 = (fanweiStart <= gkgLeft && gkgLeft <= fanweiEnd);
@@ -407,10 +400,10 @@ public class MainController {
                 Double ReactivationEndReal = ReactivationEnd;
 
                 if (!qk1) {
-                    fillInputByXpath(page, reactXpath, StrUtil.toString(NumberUtil.add(ReactivationStart, Reactivationbc)));
-                    clickByXpath(page, buttonXpath);
+                    fillInputByXpath(driver, reactXpath, StrUtil.toString(NumberUtil.add(ReactivationStart, Reactivationbc)));
+                    clickByXpath(driver, buttonXpath);
                     ThreadUtil.safeSleep(1500);
-                    String gkgTempStr = getInputValueByXpath(page, gkgXpath);
+                    String gkgTempStr = getInputValueByXpath(driver, gkgXpath);
                     if (StrUtil.isEmpty(gkgTempStr)) continue;
                     Double gkgTemp = Double.parseDouble(gkgTempStr);
                     if (NumberUtil.compare(gkgTemp, gkgLeft) > 0) {
@@ -444,21 +437,21 @@ public class MainController {
 
                 while (NumberUtil.compare(tempCurrent, searchLower) >= 0 && running.get()) {
                     try {
-                        page.evaluate(
-                            "() => { var backdrop = document.querySelector('.MuiBackdrop-root'); if(backdrop && getComputedStyle(backdrop).opacity > 0) { backdrop.click(); } }");
+                        ((JavascriptExecutor) driver).executeScript(
+                            "var backdrop = document.querySelector('.MuiBackdrop-root'); if(backdrop && getComputedStyle(backdrop).opacity > 0) { backdrop.click(); }");
                         ThreadUtil.safeSleep(300);
-                        fillInputByXpath(page, reactXpath, StrUtil.toString(tempCurrent));
+                        fillInputByXpath(driver, reactXpath, StrUtil.toString(tempCurrent));
                     } catch (Exception e) {
                         Platform.runLater(() -> appendLog("填充温度失败: " + e.getMessage(), "warn"));
                         tempCurrent = NumberUtil.sub(tempCurrent, Reactivationbc);
                         continue;
                     }
-                    clickByXpath(page, buttonXpath);
+                    clickByXpath(driver, buttonXpath);
                     ThreadUtil.safeSleep(1500);
 
                     String gkgValue;
                     try {
-                        gkgValue = getInputValueByXpath(page, gkgXpath);
+                        gkgValue = getInputValueByXpath(driver, gkgXpath);
                     } catch (Exception e) {
                         emptyCount++;
                         if (emptyCount >= MAX_EMPTY) break;
@@ -475,7 +468,7 @@ public class MainController {
                     final Double gkgVal = Double.parseDouble(gkgValue);
 
                     if (fanweiStart <= gkgVal && gkgVal <= fanweiEnd) {
-                        toListPlaywright(page, ss, linesNumber, excelWriter, sessionStartTime, true);
+                        toListSelenium(driver, ss, linesNumber, excelWriter, sessionStartTime, true);
                         groupHits.add(new double[]{tempCurrent, gkgVal});
                         lastFoundTemp = tempCurrent;
                         flag = true;
@@ -506,10 +499,10 @@ public class MainController {
                     Platform.runLater(() -> appendLog("[最优解] 第" + gIdx + "组: 中间值=" + NumberUtil.round(fMid, 4)
                         + ", 最优: g/kg=" + fBestGkg + "(" + fBestTemp + "°C), 差值=" + NumberUtil.round(fBestDiff, 4), "hit"));
 
-                    fillInputByXpath(page, reactXpath, StrUtil.toString(best[0]));
-                    clickByXpath(page, buttonXpath);
+                    fillInputByXpath(driver, reactXpath, StrUtil.toString(best[0]));
+                    clickByXpath(driver, buttonXpath);
                     ThreadUtil.safeSleep(1500);
-                    List<Object> bestRow = collectRowDataPlaywright(page, linesNumber);
+                    List<Object> bestRow = collectRowDataSelenium(driver, linesNumber);
                     bestRow.add(1, sessionStartTime);
                     bestRow.add(NumberUtil.round(midValue, 4));
                     int bestRowIdx = writerRowIndex++;
@@ -553,22 +546,18 @@ public class MainController {
         } catch (Exception e) {
             Platform.runLater(() -> appendLog("❌ " + e.getMessage(), "error"));
         } finally {
-            if (browser != null) {
-                try { browser.close(); } catch (Exception e) {}
-            }
-            if (playwright != null) {
-                try { playwright.close(); } catch (Exception e) {}
-            }
+            if (driver != null) try { driver.quit(); } catch (Exception e) {}
         }
     }
 
-    // ===== 网页参数设置 (Playwright版) =====
-    private void setWebParams(Page page, String UnitsofMeasure, String RelativeHumidity, String WetBulb,
+    // ===== 网页参数设置 (Selenium版) =====
+    private void setWebParams(WebDriver driver, String UnitsofMeasure, String RelativeHumidity, String WetBulb,
         String Pressurealtitud, String PressurealtitudV, String Showbypass, String Reactivationinputtype,
         String AirflowRange, String Dewpointrange, String Performancesafetyfactor, String PerformancesafetyfactorV,
         String ProcessAirflow, String DesiccantNedia, String SectorLayout, String RotorDiameter, String RotorDepth,
         String NetFaceAreaCalculation, String SealingArea, String ProcessStrC, String ProcessStrGKG,
         String Rph, String Reactivation1, String Reactivation2, String Reactivation3) throws InterruptedException {
+        WebDriver page = driver;
 
         String base = "//*[@id=\"root\"]/div/div/div[1]/div[1]/div[1]/div[1]/div/div/div";
 
@@ -638,6 +627,7 @@ public class MainController {
         clickByXpath(page, base2 + "/div[4]/div/div[2]");
         ThreadUtil.safeSleep(1500);
         selectOptionByText(page, SectorLayout, 3);
+        verifySelectedText(driver, "Sector Layout", base2 + "/div[4]/div/div[2]", SectorLayout);
         // Rotor diameter/depth
         boolean isCustomSector = StrUtil.equalsAnyIgnoreCase(SectorLayout, "Custom 2-sector", "Custom 3 sector");
         if (isCustomSector) {
@@ -671,146 +661,139 @@ public class MainController {
         fillInputByXpath(page, base2 + "/div[9]/div/div[2]/input", SealingArea);
         // 底部参数
         Platform.runLater(() -> appendLog("[填充值] C=" + ProcessStrC + ", GKG=" + ProcessStrGKG + ", Rph=" + Rph, ""));
-        fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[1]/div/div/input", ProcessStrC);
-        fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[2]/div/div/input", ProcessStrGKG);
-        fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[8]/div/div[2]/div/div/div/div/input", Rph);
+        String processCXpath = "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[1]/div/div/input";
+        String processGkgXpath = "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[2]/div/div/input";
+        String rphXpath = "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[8]/div/div[2]/div/div/div/div/input";
+        fillInputByXpath(page, processCXpath, ProcessStrC);
+        verifyInput(driver, "C", processCXpath, ProcessStrC);
+        fillInputByXpath(page, processGkgXpath, ProcessStrGKG);
+        verifyInput(driver, "GKG", processGkgXpath, ProcessStrGKG);
+        fillInputByXpath(page, rphXpath, Rph);
+        verifyInput(driver, "RPH", rphXpath, Rph);
         fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[5]/div/div[2]/div/div[1]/div/div/input", Reactivation1);
         fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[5]/div/div[2]/div/div[2]/div/div/input", Reactivation2);
         fillInputByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[5]/div/div[2]/div/div[5]/div/div/input", Reactivation3);
     }
 
-    // ===== Playwright 辅助方法 =====
+    // ===== Selenium 辅助方法 =====
 
-    private String getInputValueByXpath(Page page, String xpath) {
-        String jsXpath = xpath.replace("'", "\\'");
-        Object result = page.evaluate(
-            "() => { var r = document.evaluate('" + jsXpath + "', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null); var el = r.singleNodeValue; return el ? el.value : ''; }");
-        return result != null ? result.toString() : "";
+    private String getInputValueByXpath(WebDriver driver, String xpath) {
+        return driver.findElement(By.xpath(xpath)).getAttribute("value");
     }
 
-    private void fillInputByXpath(Page page, String xpath, String value) {
-        String jsXpath = xpath.replace("'", "\\'");
-        page.evaluate(
-            "(val) => { var r = document.evaluate('" + jsXpath + "', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null); var el = r.singleNodeValue; if(el) { el.focus(); var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; nativeInputValueSetter.call(el, val); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } }", value);
+    private void fillInputByXpath(WebDriver driver, String xpath, String value) {
+        WebElement element = driver.findElement(By.xpath(xpath));
+        ((JavascriptExecutor) driver).executeScript(
+            "var el=arguments[0], value=arguments[1]; el.focus();"
+                + "var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
+                + "setter.call(el,value); el.dispatchEvent(new Event('input',{bubbles:true}));"
+                + "el.dispatchEvent(new Event('change',{bubbles:true}));",
+            element, value);
     }
 
-    private void clickByXpath(Page page, String xpath) {
-        String jsXpath = xpath.replace("'", "\\'");
-        page.evaluate(
-            "() => { var r = document.evaluate('" + jsXpath + "', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null); var el = r.singleNodeValue; if(el) el.click(); }");
+    private void clickByXpath(WebDriver driver, String xpath) {
+        WebElement element = driver.findElement(By.xpath(xpath));
+        try {
+            element.click();
+        } catch (Exception e) {
+            ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
+        }
     }
 
-    private List<String> getOptionTexts(Page page) {
-        Object result = page.evaluate(
-            "() => { var opts = document.querySelectorAll('li[role=option]'); var r = []; for(var i=0; i<opts.length; i++) r.push(opts[i].getAttribute('data-value')); return r; }");
-        if (result instanceof List) return (List<String>) result;
-        return new ArrayList<>();
+    private List<WebElement> visibleOptions(WebDriver driver) {
+        List<WebElement> visible = new ArrayList<>();
+        for (WebElement option : driver.findElements(By.cssSelector("li[role='option']"))) {
+            if (option.isDisplayed()) visible.add(option);
+        }
+        return visible;
     }
 
-    private void selectOptionByIndex(Page page, int index) {
-        page.evaluate(
-            "(idx) => { var opts = document.querySelectorAll('li[role=option]'); if(opts.length > idx) opts[idx].click(); }", index);
+    private List<String> getOptionTexts(WebDriver driver) {
+        List<String> values = new ArrayList<>();
+        for (WebElement option : visibleOptions(driver)) values.add(option.getAttribute("data-value"));
+        return values;
     }
 
-    private void selectOptionByDataValue(Page page, String dataValue) {
-        page.evaluate(
-            "(dv) => { var opts = document.querySelectorAll('li[role=option]'); for(var i=0; i<opts.length; i++) { if(opts[i].getAttribute('data-value') === dv) { opts[i].click(); return; } } if(opts.length > 0) opts[0].click(); }", dataValue);
+    private void selectOptionByIndex(WebDriver driver, int index) {
+        List<WebElement> options = visibleOptions(driver);
+        if (options.size() <= index) throw new IllegalStateException("下拉选项未就绪");
+        options.get(index).click();
     }
 
-    private void selectOptionByText(Page page, String text, int maxRetry) {
-        for (int retry = 0; retry < maxRetry; retry++) {
-            try {
-                Object clicked = page.evaluate(
-                    "(searchText) => { var opts = document.querySelectorAll('li[role=option]'); for(var i=0; i<opts.length; i++) { if(opts[i].textContent.trim() === searchText) { opts[i].click(); return 'ok'; } } if(opts.length > 0) { opts[0].click(); return 'fallback'; } return 'none'; }", text);
-                if ("ok".equals(clicked) || "fallback".equals(clicked)) return;
-            } catch (Exception e) {
-                ThreadUtil.safeSleep(1000);
+    private void selectOptionByDataValue(WebDriver driver, String value) {
+        for (WebElement option : visibleOptions(driver)) {
+            if (StrUtil.equals(option.getAttribute("data-value"), value)) {
+                option.click();
+                return;
             }
         }
+        throw new IllegalStateException("未找到下拉选项: " + value);
     }
 
-    private void selectMediaOption(Page page, String desiccantMedia) {
-        page.evaluate(
-            "(media) => { var opts = document.querySelectorAll('li[role=option]'); for(var i=0; i<opts.length; i++) { var dv = opts[i].getAttribute('data-value'); var label = (dv === '1') ? 'PPS' : 'PPP'; if(label === media) { opts[i].click(); return; } } if(opts.length > 0) opts[0].click(); }", desiccantMedia);
+    private void selectOptionByText(WebDriver driver, String value, int maxRetry) {
+        for (int retry = 0; retry < maxRetry; retry++) {
+            for (WebElement option : visibleOptions(driver)) {
+                if (StrUtil.equalsIgnoreCase(option.getText().trim(), value)) {
+                    option.click();
+                    return;
+                }
+            }
+            ThreadUtil.safeSleep(1000);
+        }
+        throw new IllegalStateException("未找到下拉选项: " + value);
     }
 
-    private void selectNetFaceArea(Page page, String netFaceArea) {
-        page.evaluate(
-            "(nfa) => { var opts = document.querySelectorAll('li[role=option]'); for(var i=0; i<opts.length; i++) { var dv = opts[i].getAttribute('data-value'); var label = (dv === '0') ? 'Sealing area' : 'Active area'; if(label === nfa) { opts[i].click(); return; } } if(opts.length > 0) opts[0].click(); }", netFaceArea);
+    private void selectMediaOption(WebDriver driver, String media) {
+        for (WebElement option : visibleOptions(driver)) {
+            String label = StrUtil.equals(option.getAttribute("data-value"), "1") ? "PPS" : "PPP";
+            if (StrUtil.equalsIgnoreCase(label, media)) {
+                option.click();
+                return;
+            }
+        }
+        throw new IllegalStateException("未找到干燥剂选项: " + media);
     }
 
-    // ===== Playwright 版数据采集 =====
-
-    private List<Object> collectRowDataPlaywright(Page page, String lineNumber) {
-        List<Object> row = new ArrayList<>();
-        row.add(lineNumber);
-        // Wet Air (5 fields)
-        for (int i = 1; i <= 5; i++) {
-            row.add(getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[" + i + "]/div/div/input"));
+    private void selectNetFaceArea(WebDriver driver, String area) {
+        for (WebElement option : visibleOptions(driver)) {
+            String label = StrUtil.equals(option.getAttribute("data-value"), "0") ? "Sealing area" : "Active area";
+            if (StrUtil.equalsIgnoreCase(label, area)) {
+                option.click();
+                return;
+            }
         }
-        // Process left (7 fields)
-        for (int i = 1; i <= 7; i++) {
-            row.add(getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[" + i + "]/div/div/input"));
-        }
-        // Process right (6 fields)
-        for (int i = 1; i <= 6; i++) {
-            row.add(getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[" + i + "]/div/div/input"));
-        }
-        // Reactivation (7 fields)
-        for (int i = 1; i <= 7; i++) {
-            row.add(getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[" + i + "]/div/div/input"));
-        }
-        // RPH (1 field)
-        row.add(getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[8]/div/div[2]/div/div/div/div/input"));
-        return row;
+        throw new IllegalStateException("未找到净面面积选项: " + area);
     }
 
-    private void toListPlaywright(Page page, StringBuilder ss, String lineNumber,
+    private void verifyInput(WebDriver driver, String name, String xpath, String expected) {
+        String actual = getInputValueByXpath(driver, xpath);
+        if (!StrUtil.equals(actual == null ? "" : actual.trim(), expected == null ? "" : expected.trim())) {
+            throw new IllegalStateException(name + " 写入失败，期望: " + expected + "，实际: " + actual);
+        }
+        Platform.runLater(() -> appendLog("[已确认] " + name + " = " + actual, ""));
+    }
+
+    private void verifySelectedText(WebDriver driver, String name, String xpath, String expected) {
+        String actual = driver.findElement(By.xpath(xpath)).getText().trim();
+        if (!actual.contains(expected)) {
+            throw new IllegalStateException(name + " 选择失败，期望: " + expected + "，实际: " + actual);
+        }
+        Platform.runLater(() -> appendLog("[已确认] " + name + " = " + actual, ""));
+    }
+
+
+    private List<Object> collectRowDataSelenium(WebDriver driver, String lineNumber) {
+        return BaiscApplication.collectRowData(driver, lineNumber);
+    }
+
+    private void toListSelenium(WebDriver driver, StringBuilder ss, String lineNumber,
         ExcelWriter excelWriter, String timestamp, boolean isHit) {
-        List<String> list = Lists.newArrayList();
-        list.add(lineNumber);
-        list.add(timestamp);
-        String v1 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[1]/div/div/input");
-        String v2 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[2]/div/div/input");
-        String v3 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[3]/div/div/input");
-        String v4 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[4]/div/div/input");
-        String v5 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[2]/div/div[2]/div/div[5]/div/div/input");
-        ss.append(lineNumber).append(" Wet Air:").append(" " + v1 + " " + v2 + " " + v3 + " " + v4 + " " + v5);
-        list.addAll(Arrays.asList(v1, v2, v3, v4, v5));
-        String vv1 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[1]/div/div/input");
-        String vv2 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[2]/div/div/input");
-        String vv3 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[3]/div/div/input");
-        String vv4 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[4]/div/div/input");
-        String vv5 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[5]/div/div/input");
-        String vv6 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[6]/div/div/input");
-        String vv7 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[6]/div/div[2]/div/div[7]/div/div/input");
-        ss.append(" " + vv1 + " " + vv2 + " " + vv3 + " " + vv4 + " " + vv5 + " " + vv6 + " " + vv7);
-        list.addAll(Arrays.asList(vv1, vv2, vv3, vv4, vv5, vv6, vv7));
-        vv1 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[1]/div/div/input");
-        vv2 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[2]/div/div/input");
-        vv3 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[3]/div/div/input");
-        vv4 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[4]/div/div/input");
-        vv5 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[5]/div/div/input");
-        vv6 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[7]/div/div[2]/div/div[6]/div/div/input");
-        ss.append(" process right:").append(" " + vv1 + " " + vv2 + " " + vv3 + " " + vv4 + " " + vv5 + " " + vv6);
-        list.addAll(Arrays.asList(vv1, vv2, vv3, vv4, vv5, vv6));
-        vv1 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[1]/div/div/input");
-        vv2 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[2]/div/div/input");
-        vv3 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[3]/div/div/input");
-        vv4 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[4]/div/div/input");
-        vv5 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[5]/div/div/input");
-        vv6 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[6]/div/div/input");
-        vv7 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[3]/div/div[2]/div/div[7]/div/div/input");
-        ss.append(" Reactivation:").append(" " + vv1 + " " + vv2 + " " + vv3 + " " + vv4 + " " + vv5 + " " + vv6 + " " + vv7);
-        list.addAll(Arrays.asList(vv1, vv2, vv3, vv4, vv5, vv6, vv7));
-        vv1 = getInputValueByXpath(page, "//*[@id=\"root\"]/div/div/div[1]/div[2]/div[8]/div/div[2]/div/div/div/div/input");
-        ss.append(" RPH:").append(" " + vv1).append("\r\n");
-        list.addAll(Arrays.asList(vv1));
+        List<Object> row = collectRowDataSelenium(driver, lineNumber);
+        row.add(1, timestamp);
+        ss.append(row).append("\r\n");
         int rowIdx = writerRowIndex++;
-        excelWriter.writeRow(list);
-        if (isHit) {
-            applyRowStyle(excelWriter, rowIdx, list.size(), true, false);
-        }
+        excelWriter.writeRow(row);
+        if (isHit) applyRowStyle(excelWriter, rowIdx, row.size(), true, false);
     }
 
     // ===== 样式和日志 =====
