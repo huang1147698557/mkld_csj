@@ -7,7 +7,6 @@
     <maven.compiler.source>11</maven.compiler.source>
     <maven.compiler.target>11</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <javafx.version>17.0.2</javafx.version>
   </properties>
   <groupId>com.example</groupId>
   <artifactId>demo</artifactId>
@@ -20,7 +19,6 @@
       <artifactId>spring-boot-starter</artifactId>
       <version>2.2.6.RELEASE</version>
     </dependency>
-
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
@@ -41,6 +39,11 @@
       <groupId>cn.hutool</groupId>
       <artifactId>hutool-all</artifactId>
       <version>5.7.22</version>
+    </dependency>
+    <dependency>
+      <groupId>com.microsoft.playwright</groupId>
+      <artifactId>playwright</artifactId>
+      <version>1.49.0</version>
     </dependency>
     <dependency>
       <groupId>org.seleniumhq.selenium</groupId>
@@ -72,38 +75,13 @@
       <artifactId>jna</artifactId>
       <version>5.5.0</version>
     </dependency>
-    <!-- JavaFX -->
-    <dependency>
-      <groupId>org.openjfx</groupId>
-      <artifactId>javafx-controls</artifactId>
-      <version>${javafx.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.openjfx</groupId>
-      <artifactId>javafx-fxml</artifactId>
-      <version>${javafx.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.openjfx</groupId>
-      <artifactId>javafx-base</artifactId>
-      <version>${javafx.version}</version>
-      <classifier>mac</classifier>
-    </dependency>
-    <dependency>
-      <groupId>org.openjfx</groupId>
-      <artifactId>javafx-graphics</artifactId>
-      <version>${javafx.version}</version>
-      <classifier>mac</classifier>
-    </dependency>
   </dependencies>
-
   <repositories>
     <repository>
       <id>central</id>
       <url>https://repo.maven.apache.org/maven2</url>
     </repository>
   </repositories>
-
   <build>
     <plugins>
       <plugin>
@@ -120,7 +98,7 @@
         <groupId>org.springframework.boot</groupId>
         <version>2.2.6.RELEASE</version>
         <artifactId>spring-boot-maven-plugin</artifactId>
-        <configuration><!-- 指定该Main Class为全局的唯一入口 -->
+        <configuration>
           <mainClass>com.sd.discovery.single.BaiscApplication</mainClass>
           <layout>ZIP</layout>
           <classifier>cli</classifier>
@@ -128,16 +106,14 @@
         <executions>
           <execution>
             <goals>
-              <goal>repackage</goal><!--可以把依赖的包都打包到生成的Jar包中 -->
+              <goal>repackage</goal>
             </goals>
           </execution>
         </executions>
       </plugin>
     </plugins>
   </build>
-
   <profiles>
-    <!-- JavaFX 桌面版打包 profile -->
     <profile>
       <id>javafx-app</id>
       <build>
@@ -154,7 +130,7 @@
                   <finalName>procalc5-app</finalName>
                   <transformers>
                     <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                      <mainClass>com.sd.discovery.single.Procalc5App</mainClass>
+                      <mainClass>com.sd.discovery.single.ProCalc5App</mainClass>
                     </transformer>
                   </transformers>
                   <filters>
@@ -175,5 +151,4 @@
       </build>
     </profile>
   </profiles>
-
 </project>
