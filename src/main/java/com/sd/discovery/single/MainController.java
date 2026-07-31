@@ -285,14 +285,18 @@ public class MainController {
         String username = usernameField.getText().trim();
         String password = passwordField.getText().trim();
 
-        ChromeOptions options = new ChromeOptions();
-        options.addArguments("--no-sandbox");
-        options.addArguments("--disable-dev-shm-usage");
-        WebDriver driver = new ChromeDriver(options);
-
+        WebDriver driver = null;
         try {
+            // 启动浏览器
+            Platform.runLater(() -> appendLog("正在启动 Chrome 浏览器...", "info"));
+            ChromeOptions options = new ChromeOptions();
+            options.addArguments("--no-sandbox");
+            options.addArguments("--disable-dev-shm-usage");
+            driver = new ChromeDriver(options);
+            Platform.runLater(() -> appendLog("浏览器启动成功", "info"));
+
             // 登录
-            Platform.runLater(() -> appendLog("正在打开浏览器...", "info"));
+            Platform.runLater(() -> appendLog("正在打开网页...", "info"));
             driver.get(DEFAULT_URL);
             ThreadUtil.safeSleep(8000);
             driver.findElement(By.id("userNameInput")).sendKeys(username);
@@ -545,7 +549,9 @@ public class MainController {
         } catch (Exception e) {
             Platform.runLater(() -> appendLog("❌ " + e.getMessage(), "error"));
         } finally {
-            try { driver.quit(); } catch (Exception e) {}
+            if (driver != null) {
+                try { driver.quit(); } catch (Exception e) {}
+            }
         }
     }
 
