@@ -287,11 +287,30 @@ public class MainController {
 
         WebDriver driver = null;
         try {
+            // 自动查找并设置 chromedriver 路径，避免 Selenium Manager 下载卡住
+            String chromeDriverPath = findChromeDriver();
+            if (chromeDriverPath != null) {
+                System.setProperty("webdriver.chrome.driver", chromeDriverPath);
+                Platform.runLater(() -> appendLog("ChromeDriver: " + chromeDriverPath, ""));
+            } else {
+                Platform.runLater(() -> appendLog("未找到本地 chromedriver，将使用 Selenium Manager 自动下载", "warn"));
+            }
+
             // 启动浏览器
             Platform.runLater(() -> appendLog("正在启动 Chrome 浏览器...", "info"));
             ChromeOptions options = new ChromeOptions();
             options.addArguments("--no-sandbox");
             options.addArguments("--disable-dev-shm-usage");
+            // macOS: 显式指定 Chrome 路径
+            String osName = System.getProperty("os.name").toLowerCase();
+            if (osName.contains("mac")) {
+                File chromeBin = new File("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+                if (chromeBin.exists()) {
+                    options.setBinary(chromeBin.getAbsolutePath());
+                    Platform.runLater(() -> appendLog("Chrome 路径: " + chromeBin.getAbsolutePath(), ""));
+                }
+            }
+            Platform.runLater(() -> appendLog("正在初始化 ChromeDriver...", ""));
             driver = new ChromeDriver(options);
             Platform.runLater(() -> appendLog("浏览器启动成功", "info"));
 
@@ -719,6 +738,52 @@ public class MainController {
 
     private void safeClick(WebElement button) {
         try { BaiscApplication.click(button); } catch (Exception e) {}
+    }
+
+    /**
+     * 自动查找本地 chromedriver 路径（Selenium Manager 缓存 / 系统路径）
+     */
+    private String findChromeDriver() {
+        String osName = System.getProperty("os.name").toLowerCase();
+        String home = System.getProperty("user.home");
+        List<String> candidates = new ArrayList<>();
+
+        if (osName.contains("mac")) {
+            // Selenium Manager 缓存目录
+            candidates.add(home + "/.cache/selenium/chromedriver/mac-arm64/");
+            candidates.add(home + "/.cache/selenium/chromedriver/mac64/");
+            // Homebrew
+            candidates.add("/opt/homebrew/bin/chromedriver");
+            candidates.add("/usr/local/bin/chromedriver");
+        } else if (osName.contains("win")) {
+            candidates.add(home + "\\.cache\\selenium\\chromedriver\\win64\\");
+            candidates.add(home + "\\.cache\\selenium\\chromedriver\\win32\\");
+        } else {
+            candidates.add(home + "/.cache/selenium/chromedriver/linux64/");
+            candidates.add("/usr/local/bin/chromedriver");
+            candidates.add("/usr/bin/chromedriver");
+        }
+
+        for (String path : candidates) {
+            File f = new File(path);
+            if (f.isFile() && f.canExecute()) {
+                return f.getAbsolutePath();
+            }
+            if (f.isDirectory()) {
+                // 查找最新版本的 chromedriver
+                File[] subdirs = f.listFiles(File::isDirectory);
+                if (subdirs != null) {
+                    Arrays.sort(subdirs, Comparator.comparing(File::getName).reversed());
+                    for (File sub : subdirs) {
+                        File cd = new File(sub, osName.contains("win") ? "chromedriver.exe" : "chromedriver");
+                        if (cd.exists() && cd.canExecute()) {
+                            return cd.getAbsolutePath();
+                        }
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     // ===== 日志 =====
