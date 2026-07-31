@@ -534,7 +534,7 @@ public class MainController {
                     bestRow.add(NumberUtil.round(midValue, 4));
                     int bestRowIdx = writerRowIndex++;
                     currentExcelWriter.writeRow(bestRow);
-                    applyRowStyle(currentExcelWriter, bestRowIdx, bestRow.size(), true, true);
+                    applyRowStyle(currentExcelWriter, bestRowIdx, bestRow.size(), false, true);
                     currentBestResults.add(bestRow);
                     bestCount.incrementAndGet();
                     Platform.runLater(() -> statBest.setText(String.valueOf(bestCount.get())));
@@ -575,7 +575,7 @@ public class MainController {
                 int bestIdx = 1;
                 for (List<Object> row : currentBestResults) {
                     bestWriter.writeRow(row);
-                    applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
+                    applyRowStyle(bestWriter, bestIdx, row.size(), true, false);
                     bestIdx++;
                 }
                 bestWriter.flush();
@@ -600,7 +600,7 @@ public class MainController {
                 int bestIdx = 1;
                 for (List<Object> row : currentBestResults) {
                     bestWriter.writeRow(row);
-                    applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
+                    applyRowStyle(bestWriter, bestIdx, row.size(), true, false);
                     bestIdx++;
                 }
                 bestWriter.flush();

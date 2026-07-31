@@ -536,10 +536,10 @@ public class BaiscApplication {
         List<Object> bestRow = collectRowData(driver, linesNumber);
         bestRow.add(1, sessionTimeDisplay); // 插入可读时间到第2列
         bestRow.add(NumberUtil.round(midValue, 4)); // 额外列：范围中间值
-        // 写入全量文件（红色+加粗标记最优解）
+        // 写入全量文件（红色标记最优解）
         int bestRowIdx = writerRowIndex++;
         excelWriter.writeRow(bestRow);
-        applyRowStyle(excelWriter, bestRowIdx, bestRow.size(), true, true);
+        applyRowStyle(excelWriter, bestRowIdx, bestRow.size(), false, true);
         bestResults.add(bestRow);
       } else {
         System.out.println("[最优解] 第" + groupIndex + "组: 无命中记录，跳过");
@@ -558,7 +558,7 @@ public class BaiscApplication {
     int bestIdx = 1;
     for (List<Object> row : bestResults) {
       bestWriter.writeRow(row);
-      applyRowStyle(bestWriter, bestIdx, row.size(), true, true);
+      applyRowStyle(bestWriter, bestIdx, row.size(), true, false);
       bestIdx++;
     }
     bestWriter.flush();
