@@ -294,6 +294,7 @@ public class MainController {
         WebDriver driver = null;
         try {
             appendLog("正在启动 Chrome...", "info");
+            configureChromeDriver();
             ChromeOptions options = new ChromeOptions();
             options.addArguments("--start-maximized");
             driver = new ChromeDriver(options);
@@ -610,6 +611,32 @@ public class MainController {
         } catch (Exception e) {
             appendLog("保存数据失败: " + e.getMessage(), "error");
         }
+    }
+
+    private void configureChromeDriver() {
+        String configuredDriver = System.getProperty("webdriver.chrome.driver");
+        if (StrUtil.isNotBlank(configuredDriver)) {
+            appendLog("使用指定的 ChromeDriver: " + configuredDriver, "info");
+            return;
+        }
+
+        List<File> candidates = new ArrayList<>();
+        String driverFromEnvironment = System.getenv("PROCALC_CHROMEDRIVER");
+        if (StrUtil.isNotBlank(driverFromEnvironment)) {
+            candidates.add(new File(driverFromEnvironment));
+        }
+        candidates.add(new File(workDir, "chromedriver.exe"));
+        candidates.add(new File(System.getProperty("user.dir"), "chromedriver.exe"));
+
+        for (File candidate : candidates) {
+            if (candidate.isFile()) {
+                System.setProperty("webdriver.chrome.driver", candidate.getAbsolutePath());
+                appendLog("使用本地 ChromeDriver: " + candidate.getAbsolutePath(), "info");
+                return;
+            }
+        }
+
+        appendLog("未找到本地 ChromeDriver，将尝试自动下载", "warn");
     }
 
     // ===== 网页参数设置 (Selenium版) =====
