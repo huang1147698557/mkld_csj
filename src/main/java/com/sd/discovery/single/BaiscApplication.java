@@ -36,6 +36,7 @@ public class BaiscApplication {
 
   // 默认工作目录：Windows=C:\procalc5，Mac/Linux=用户目录下的procalc5
   private static String workDir;
+  private static String inputFile; // 自定义输入文件路径（--input=），为空时使用默认
   private static String sessionStartTime; // 本次会话时间戳 yyyyMMddHHmmss
   private static int writerRowIndex = 1;  // 当前写入行索引（用于追加写入）
 
@@ -51,10 +52,12 @@ public class BaiscApplication {
   public static void main(String[] args) {
     SpringApplication.run(BaiscApplication.class, args);
 
-    // 支持命令行参数覆盖：--workdir=/path/to/dir  --chromedriver=/path/to/chromedriver
+    // 支持命令行参数覆盖：--workdir=/path/to/dir  --input=/path/to/file.xlsx  --chromedriver=/path/to/chromedriver
     for (String arg : args) {
       if (arg.startsWith("--workdir=")) {
         workDir = arg.substring("--workdir=".length());
+      } else if (arg.startsWith("--input=")) {
+        inputFile = arg.substring("--input=".length());
       } else if (arg.startsWith("--chromedriver=")) {
         // 仅当用户显式指定时才设置，否则由 Selenium Manager 自动管理
         System.setProperty("webdriver.chrome.driver", arg.substring("--chromedriver=".length()));
@@ -62,6 +65,9 @@ public class BaiscApplication {
     }
 
     System.out.println("工作目录: " + workDir);
+    if (inputFile != null) {
+      System.out.println("输入文件: " + inputFile);
+    }
     test();
   }
 
@@ -97,14 +103,19 @@ public class BaiscApplication {
     WebDriver driver = new ChromeDriver(options);
     sessionStartTime = DateUtil.format(DateUtil.date(), "yyyyMMddHHmmss");
     driver.get("https://procalc5.proflute.se/rotor");
-    ThreadUtil.safeSleep(8000);
-    WebElement username = driver.findElement(By.id("userNameInput"));
-    WebElement password = driver.findElement(By.id("passwordInput"));
+    WebElement username = waitForVisibleElement(driver, "用户名输入框",
+        By.id("userNameInput"), By.id("username"), By.name("username"),
+        By.name("UserName"), By.cssSelector("input[type='email']"));
+    WebElement password = waitForVisibleElement(driver, "密码输入框",
+        By.id("passwordInput"), By.id("password"), By.name("password"), By.name("Password"));
     username.sendKeys(usernameValue);
     password.sendKeys(passwordValue);
-    WebElement login = driver.findElement(By.xpath("//*[@id=\"submitButton\"]"));
+    WebElement login = waitForVisibleElement(driver, "登录按钮",
+        By.id("submitButton"), By.id("kc-login"), By.cssSelector("button[type='submit']"),
+        By.cssSelector("input[type='submit']"));
     login.click();
-    ThreadUtil.safeSleep(5000);
+    waitForVisibleElement(driver, "转子计算表单",
+        By.xpath("//*[@id=\"root\"]/div/div/div[1]/div[2]/div[9]/div[3]/button"));
     String sep = System.getProperty("os.name").toLowerCase().contains("win") ? "\\" : "/";
     // 全量累积文件：追加模式
     String allFilePath = workDir + sep + "calculate_results_all.xlsx";
@@ -125,7 +136,7 @@ public class BaiscApplication {
       writerRowIndex = 1;
     }
     //登陆成功
-    List<List<Object>> paraList = ExcelUtil.getReader(workDir + sep + "procalc5.proflute.xlsx").read();
+    List<List<Object>> paraList = ExcelUtil.getReader(inputFile != null ? inputFile : workDir + sep + "procalc5.proflute.xlsx").read();
     Double lastFoundTemp = null; // 跨行保持上一轮找到的温度值，用于下一轮倒序查找上限
     List<List<Object>> bestResults = new ArrayList<>(); // 各组最优解汇总
     int groupIndex = 0; // 组号计数器
@@ -552,6 +563,22 @@ public class BaiscApplication {
     System.out.println("全量数据已追加到: " + allFilePath);
     System.out.println("共" + bestResults.size() + "组最优解，已写入: " + bestFilePath);
     System.out.println("总数据:" + ss);
+  }
+
+  private static WebElement waitForVisibleElement(WebDriver driver, String description, By... selectors) {
+    long deadline = System.currentTimeMillis() + 60000;
+    while (System.currentTimeMillis() < deadline) {
+      for (By selector : selectors) {
+        for (WebElement element : driver.findElements(selector)) {
+          if (element.isDisplayed() && element.isEnabled()) {
+            return element;
+          }
+        }
+      }
+      ThreadUtil.safeSleep(250);
+    }
+    throw new IllegalStateException("等待" + description + "超时，当前页面: " + driver.getCurrentUrl()
+        + "，标题: " + driver.getTitle());
   }
 
   public static void click(WebElement button) {
